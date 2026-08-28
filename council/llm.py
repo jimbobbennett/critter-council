@@ -1,44 +1,53 @@
-"""The single seam between the council and the Claude API.
+"""The single seam between the council and the model.
+
+The calls go through `langchain-anthropic`'s ChatAnthropic rather than the
+Anthropic SDK directly. That is a tracing decision: OpenInference's LangChain
+instrumentor builds its span tree from LangChain's own callback metadata and
+never attaches spans to the OpenTelemetry context, so an SDK call made inside a
+graph node starts a *separate trace* — the graph and its LLM calls arrive in
+Arize (or Phoenix) disconnected. Routing through ChatAnthropic means both come
+from the same instrumentor, so each LLM span nests under the node that made it
+and per-node token cost is attributable. No instrumentation is installed here;
+this just means it works if you add some.
+
+Everything the sketches depend on survives the change, which was verified before
+making it: web_search result blocks keep their URLs, web_fetch errors keep
+`url_not_accessible`, prompt caching still reports cache reads, and streaming
+still returns the tool result blocks.
 
 Design notes worth knowing before editing:
 
-* Model default is `claude-opus-5`. Thinking is ON by default on Opus 5, and
-  `max_tokens` is a hard cap on thinking *plus* visible text — so the budgets
-  here look generous for two-sentence quips on purpose. Lowballing them
-  truncates mid-thought.
-* `effort` lives inside `output_config`, not top-level. Low/medium effort is
-  unusually strong on Opus 5 and is the real latency lever, so the banter runs
-  at "low" and only the Minutes go to "medium".
-* `temperature` / `top_p` are rejected on Opus 5, so variety comes from the
-  rotating flavour noun in the user message.
-* Character system prompts are stable across rounds and carry a cache
-  breakpoint; the volatile per-turn content goes in the user message, after it.
-* Web search is the server-side `web_search_20260209` tool — real results, and
-  ANTHROPIC_API_KEY is the only credential needed.
+* Two models on purpose. Character turns are short and voice-critical, so they
+  get Opus. Research turns pull whole pages into context — ~20k input tokens per
+  search and up to ~55k per fetch, because the _20260209 tools run
+  dynamic-filtering code-execution rounds — so they go to Sonnet, which costs
+  less and only has to summarise accurately.
+* `effort` is passed as an invoke-time keyword. Putting it in `model_kwargs`
+  works but emits a UserWarning, and a warning printed during the live display
+  corrupts the frame.
+* `usage_metadata["input_tokens"]` is the TOTAL including cached tokens, unlike
+  the raw SDK where it excludes them. The ledger subtracts them, or a cached
+  sitting would be costed at ten times what it actually cost.
 """
 
 from __future__ import annotations
 
-import json
 import os
 import time
 from typing import Any, TypeVar
 
+from langchain_anthropic import ChatAnthropic
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel
 
-# Two models on purpose. The character turns are short, voice-critical, and
-# cheap, so they get Opus. The research turns pull whole web pages into context
-# — measured at ~20k input tokens per search and ~55k per fetch, because the
-# _20260209 tools run dynamic-filtering code-execution rounds — so they go to
-# Sonnet, which costs less per token and only needs to summarise accurately.
 MODEL = os.environ.get("COUNCIL_MODEL", "claude-opus-5")
 RESEARCH_MODEL = os.environ.get("COUNCIL_RESEARCH_MODEL", "claude-sonnet-5")
 
-# max_uses must exceed the number of queries handed over, with headroom: the
-# model reformulates and follows up, and every attempt past the cap comes back as
-# a max_uses_exceeded error result. Those wasted attempts cost tokens AND poison
-# the digest — a capped-out model writes "I cannot run additional searches"
-# instead of findings, which the rest of the council then reasons over.
+# max_uses must comfortably exceed the number of queries handed over, because the
+# model reformulates and follows up. Every attempt past the cap returns a
+# max_uses_exceeded error result, which costs tokens AND poisons the digest — a
+# capped-out model writes "I cannot run additional searches" where the findings
+# should be, and the rest of the council reasons over that as if it were evidence.
 SEARCH_BUDGET = 6
 FETCH_BUDGET = 4
 
@@ -63,10 +72,11 @@ PRICES = {
     "claude-haiku-4-5": (1.0, 5.0),
 }
 
+T = TypeVar("T", bound=BaseModel)
+
 
 class Ledger:
-    """Running token/cost total for the sitting. Cache reads are billed at
-    about a tenth of the input rate, which is why they are counted separately."""
+    """Running token and cost total for the sitting."""
 
     def __init__(self) -> None:
         self.reset()
@@ -84,26 +94,49 @@ class Ledger:
         self.fetches = 0
         self.cost = 0.0
 
-    def add(self, model: str, usage) -> None:
+    def add(self, model: str, message: AIMessage | None) -> None:
+        if message is None:
+            return
+        usage = getattr(message, "usage_metadata", None) or {}
+        details = usage.get("input_token_details") or {}
+        cache_read = details.get("cache_read") or 0
+        cache_write = details.get("cache_creation") or 0
+        # input_tokens is the total here, cached included. Subtracting gives the
+        # portion actually charged at the full input rate.
+        uncached = max(0, (usage.get("input_tokens") or 0) - cache_read - cache_write)
+        output = usage.get("output_tokens") or 0
+
         rate_in, rate_out = PRICES.get(model, (5.0, 25.0))
-        i = getattr(usage, "input_tokens", 0) or 0
-        cr = getattr(usage, "cache_read_input_tokens", 0) or 0
-        cw = getattr(usage, "cache_creation_input_tokens", 0) or 0
-        o = getattr(usage, "output_tokens", 0) or 0
         self.calls += 1
-        self.input += i
-        self.cache_read += cr
-        self.cache_write += cw
-        self.output += o
+        self.input += uncached
+        self.cache_read += cache_read
+        self.cache_write += cache_write
+        self.output += output
         spend = (
-            i * rate_in + cw * rate_in * 1.25 + cr * rate_in * 0.1 + o * rate_out
+            uncached * rate_in
+            + cache_write * rate_in * 1.25
+            + cache_read * rate_in * 0.1
+            + output * rate_out
         ) / 1_000_000
         self.cost += spend
         self.session_cost += spend
-        stu = getattr(usage, "server_tool_use", None)
-        if stu is not None:
-            self.searches += getattr(stu, "web_search_requests", 0) or 0
-            self.fetches += getattr(stu, "web_fetch_requests", 0) or 0
+
+        # Server-side tool counts are read from the content blocks, not from
+        # response_metadata["usage"]["server_tool_use"]: that is present on a
+        # normal reply but absent from a streamed one, and both research turns
+        # stream. Counting the blocks works for both. Filtered by name because
+        # the _20260209 tools also emit code_execution server_tool_use blocks
+        # for their own dynamic filtering.
+        content = getattr(message, "content", None)
+        if isinstance(content, list):
+            for block in content:
+                if not isinstance(block, dict) or block.get("type") != "server_tool_use":
+                    continue
+                name = block.get("name")
+                if name == "web_search":
+                    self.searches += 1
+                elif name == "web_fetch":
+                    self.fetches += 1
 
     def summary(self) -> str:
         total_in = self.input + self.cache_read + self.cache_write
@@ -115,8 +148,6 @@ class Ledger:
 
 
 LEDGER = Ledger()
-
-T = TypeVar("T", bound=BaseModel)
 
 # --- demo mode -------------------------------------------------------------------
 
@@ -136,33 +167,38 @@ def demo_motion() -> str:
     return _FIXTURES.get("motion", "")
 
 
-# --- client ----------------------------------------------------------------------
+# --- models ----------------------------------------------------------------------
 
-_client = None
+_CHATS: dict[tuple[str, int], ChatAnthropic] = {}
 
 # Set when a call has failed outright, so the UI can say so in character.
 FAILURES: list[str] = []
 
 
-def client():
-    global _client
-    if _client is None:
-        import anthropic
+def chat(model: str, max_tokens: int) -> ChatAnthropic:
+    """A cached ChatAnthropic. Instances are stateless, so sharing is safe.
 
-        # The search and fetch turns run server-side tool loops that can take
-        # minutes, which is long enough for a connection to be dropped. More
-        # retries than the default 2, and a generous timeout.
-        _client = anthropic.Anthropic(max_retries=5, timeout=900.0)
-    return _client
+    The generous timeout is for the research turns: a server-side tool loop can
+    run for minutes, which is long enough for a connection to be dropped.
+    """
+    key = (model, max_tokens)
+    if key not in _CHATS:
+        _CHATS[key] = ChatAnthropic(
+            model=model,
+            max_tokens=max_tokens,
+            max_retries=5,
+            timeout=900.0,
+        )
+    return _CHATS[key]
 
 
 def preflight() -> str | None:
     """Return an error string if a live run can't possibly work.
 
-    An unset ANTHROPIC_API_KEY does not by itself mean there are no
-    credentials — the SDK also reads ANTHROPIC_AUTH_TOKEN and an `ant auth
-    login` profile on disk. Blocking on the env var alone would lock out anyone
-    authenticated that way, so check all three.
+    An unset ANTHROPIC_API_KEY does not by itself mean there are no credentials —
+    the SDK also reads ANTHROPIC_AUTH_TOKEN and an `ant auth login` profile on
+    disk. Blocking on the env var alone would lock out anyone authenticated that
+    way, so check all three.
     """
     if DEMO:
         return None
@@ -189,32 +225,48 @@ def preflight() -> str | None:
 # --- request helpers -------------------------------------------------------------
 
 
-def _system(prompt: str) -> list[dict]:
+def _system(prompt: str) -> SystemMessage:
     """System prompt with a cache breakpoint, so repeat rounds read at ~0.1x."""
-    return [
-        {
-            "type": "text",
-            "text": prompt,
-            "cache_control": {"type": "ephemeral"},
-        }
+    return SystemMessage(
+        content=[
+            {"type": "text", "text": prompt, "cache_control": {"type": "ephemeral"}}
+        ]
+    )
+
+
+def _blocks(message: AIMessage | None) -> list[dict]:
+    """Content blocks, as dicts. A plain-text reply has none."""
+    if message is None:
+        return []
+    content = message.content
+    return [b for b in content if isinstance(b, dict)] if isinstance(content, list) else []
+
+
+def _text(message: AIMessage | None) -> str:
+    """Every text block joined. Thinking blocks and tool results are skipped."""
+    if message is None:
+        return ""
+    content = message.content
+    if isinstance(content, str):
+        return content.strip()
+    parts = [
+        b.get("text", "")
+        for b in content
+        if isinstance(b, dict) and b.get("type") == "text"
     ]
+    return "\n".join(p for p in parts if p).strip()
 
 
-def _one_call(messages: list, stream: bool, kwargs: dict) -> Any:
-    """A single request, streamed or not.
-
-    Long server-tool turns are streamed: it keeps bytes moving so an idle
-    connection is less likely to be dropped mid-flight, which is exactly the
-    failure that used to kill a sitting.
-    """
-    if stream:
-        with client().messages.stream(messages=messages, **kwargs) as s:
-            return s.get_final_message()
-    return client().messages.create(messages=messages, **kwargs)
-
-
-def _create(*, stream: bool = False, **kwargs) -> Any | None:
-    """messages.create with pause_turn resumption, retries, and cost accounting.
+def _run(
+    runnable: Any,
+    messages: list,
+    *,
+    model: str,
+    effort: str = "low",
+    stream: bool = False,
+    label: str = "a council turn",
+) -> Any:
+    """Invoke with retries, pause_turn resumption and cost accounting.
 
     Returns None if the request could not be completed at all. Callers must
     handle None: one flaky connection should cost the council a turn, not the
@@ -222,73 +274,58 @@ def _create(*, stream: bool = False, **kwargs) -> Any | None:
     """
     import anthropic
 
-    messages = list(kwargs.pop("messages"))
-    model = kwargs.get("model", MODEL)
-    label = "search/fetch" if kwargs.get("tools") else "a council turn"
+    kwargs = {"output_config": {"effort": effort}}
+    history = list(messages)
 
     for _ in range(4):  # pause_turn resumptions
-        resp = None
-        # The SDK already retries connection errors; this is a second line of
-        # defence for the expensive tool calls, with a longer backoff.
+        result = None
         for attempt in range(3):
             try:
-                resp = _one_call(messages, stream, kwargs)
+                if stream:
+                    chunks = list(runnable.stream(history, **kwargs))
+                    if not chunks:
+                        result = None
+                        break
+                    merged = chunks[0]
+                    for chunk in chunks[1:]:
+                        merged = merged + chunk
+                    result = merged
+                else:
+                    result = runnable.invoke(history, **kwargs)
                 break
             except (anthropic.APIConnectionError, anthropic.InternalServerError) as exc:
                 if attempt == 2:
                     FAILURES.append(f"{label}: {type(exc).__name__}")
                     return None
                 time.sleep(2.0 * (attempt + 1))
-            except anthropic.RateLimitError as exc:
+            except anthropic.RateLimitError:
                 if attempt == 2:
                     FAILURES.append(f"{label}: rate limited")
                     return None
                 time.sleep(10.0 * (attempt + 1))
             except anthropic.APIStatusError as exc:
-                # 4xx: retrying an invalid request just wastes time.
+                # 4xx: retrying an invalid request only wastes time.
                 FAILURES.append(f"{label}: HTTP {exc.status_code}")
                 return None
+            except Exception as exc:  # noqa: BLE001 — never kill the sitting
+                if attempt == 2:
+                    FAILURES.append(f"{label}: {type(exc).__name__}")
+                    return None
+                time.sleep(2.0 * (attempt + 1))
 
-        if resp is None:
+        if result is None:
             return None
-        LEDGER.add(model, resp.usage)
-        if resp.stop_reason != "pause_turn":
-            return resp
-        messages = messages + [{"role": "assistant", "content": resp.content}]
-    return resp
 
+        # with_structured_output(include_raw=True) yields a dict, not a message.
+        message = result.get("raw") if isinstance(result, dict) else result
+        LEDGER.add(model, message if isinstance(message, AIMessage) else None)
 
-def _tool_use_urls(resp: Any) -> dict[str, str]:
-    """Map server_tool_use id -> the URL it was asked to fetch.
-
-    Needed because a failed web_fetch result carries error_code but a null url,
-    so the only way to name the deceased source is to correlate on tool_use_id.
-    """
-    out: dict[str, str] = {}
-    for block in resp.content:
-        if block.type != "server_tool_use":
-            continue
-        data = block.input if isinstance(block.input, dict) else {}
-        url = data.get("url")
-        if url:
-            out[block.id] = url
-    return out
-
-
-def _first_text(resp: Any) -> str:
-    """Thinking blocks precede text, so never index content[0] blindly."""
-    if getattr(resp, "stop_reason", None) == "refusal":
-        return ""
-    for block in resp.content:
-        if block.type == "text":
-            return block.text
-    return ""
-
-
-def _all_text(resp: Any) -> str:
-    if getattr(resp, "stop_reason", None) == "refusal":
-        return ""
-    return "\n".join(b.text for b in resp.content if b.type == "text")
+        stop = (getattr(message, "response_metadata", None) or {}).get("stop_reason")
+        if stop != "pause_turn":
+            return result
+        # A long server-tool turn can pause; append it and continue.
+        history = history + [message]
+    return result
 
 
 # --- public API ------------------------------------------------------------------
@@ -308,28 +345,19 @@ def structured(
         data = _FIXTURES.get(demo_key or "", None)
         return model_cls.model_validate(data) if data is not None else None
 
-    resp = _create(
-        model=MODEL,
-        max_tokens=max_tokens,
-        system=_system(system),
-        messages=[{"role": "user", "content": user}],
-        output_config={
-            "effort": effort,
-            "format": {
-                "type": "json_schema",
-                "schema": model_cls.model_json_schema(),
-            },
-        },
+    runnable = chat(MODEL, max_tokens).with_structured_output(
+        model_cls, include_raw=True
     )
-    if resp is None:
+    result = _run(
+        runnable,
+        [_system(system), HumanMessage(user)],
+        model=MODEL,
+        effort=effort,
+    )
+    if not isinstance(result, dict):
         return None
-    raw = _first_text(resp)
-    if not raw:
-        return None
-    try:
-        return model_cls.model_validate(json.loads(raw))
-    except Exception:
-        return None
+    parsed = result.get("parsed")
+    return parsed if isinstance(parsed, model_cls) else None
 
 
 def prose(
@@ -344,14 +372,13 @@ def prose(
     if DEMO:
         return _FIXTURES.get(demo_key or "", "")
 
-    resp = _create(
+    result = _run(
+        chat(MODEL, max_tokens),
+        [_system(system), HumanMessage(user)],
         model=MODEL,
-        max_tokens=max_tokens,
-        system=_system(system),
-        messages=[{"role": "user", "content": user}],
-        output_config={"effort": effort},
+        effort=effort,
     )
-    return _all_text(resp).strip() if resp is not None else ""
+    return _text(result)
 
 
 def search_and_digest(
@@ -360,9 +387,9 @@ def search_and_digest(
     """Run real web search server-side.
 
     Returns (digest, sources, notes). `sources` comes from the tool result
-    blocks; `digest` is the model's own factual summary of what it read, which
-    is what the rest of the council reasons over. Search results carry the page
-    text in encrypted form, so the model's summary is the only readable form.
+    blocks; `digest` is the model's own factual summary of what it read, which is
+    what the rest of the council reasons over. Search results carry the page text
+    in encrypted form, so the model's summary is the only readable form.
     """
     if DEMO:
         canned = _FIXTURES.get(demo_key or "", {}) or {}
@@ -372,53 +399,46 @@ def search_and_digest(
             canned.get("notes", []),
         )
 
-    resp = _create(
+    runnable = chat(RESEARCH_MODEL, max_tokens).bind_tools([WEB_SEARCH])
+    result = _run(
+        runnable,
+        [_system(system), HumanMessage(user)],
         model=RESEARCH_MODEL,
-        max_tokens=max_tokens,
-        system=_system(system),
-        messages=[{"role": "user", "content": user}],
-        tools=[WEB_SEARCH],
-        output_config={"effort": "low"},
         stream=True,
+        label="search",
     )
-    if resp is None:
+    if result is None:
         return "", [], ["connection_lost"]
 
     sources: list[dict] = []
     notes: list[str] = []
-    for block in resp.content:
-        if block.type != "web_search_tool_result":
+    for block in _blocks(result):
+        if block.get("type") != "web_search_tool_result":
             continue
-        content = block.content
+        content = block.get("content")
         # Success gives a list of results; failure gives a single error object.
         if isinstance(content, list):
-            for r in content:
-                url = getattr(r, "url", None)
+            for item in content:
+                url = item.get("url") if isinstance(item, dict) else None
                 if url:
                     sources.append(
                         {
                             "url": url,
-                            "title": getattr(r, "title", "") or url,
+                            "title": item.get("title") or url,
                             "snippet": "",
                         }
                     )
-        else:
-            code = getattr(content, "error_code", "search_failed")
-            # max_uses_exceeded is not a failure to report — it means the model
-            # ran out of budget after already getting results. Only surface it
-            # when nothing at all came back.
-            notes.append(code)
+        elif isinstance(content, dict):
+            notes.append(content.get("error_code", "search_failed"))
 
-    # De-duplicate by URL, preserving order.
     seen: set[str] = set()
     unique = []
-    for s in sources:
-        if s["url"] not in seen:
-            seen.add(s["url"])
-            unique.append(s)
+    for source in sources:
+        if source["url"] not in seen:
+            seen.add(source["url"])
+            unique.append(source)
 
-    digest = _all_text(resp).strip()
-
+    digest = _text(result)
     # A digest this short is not a summary of a page of search results — it is
     # the model explaining why it stopped. Passing it downstream is worse than
     # passing nothing, because Owlsworth would treat it as evidence.
@@ -434,9 +454,9 @@ def fetch_pages(
     """Try to actually retrieve the pages. Failures become dead parrots.
 
     web_fetch only retrieves URLs already present in the conversation, so the
-    list is spelled out in the user message. A genuinely unreachable, blocked,
-    or paywalled page comes back as an error result — which is where the Dead
-    Parrot sketch fires from. It is a real error handler wearing a costume.
+    list is spelled out in the user message. A genuinely unreachable, blocked or
+    paywalled page comes back as an error result — which is where the Dead Parrot
+    sketch fires from. It is a real error handler wearing a costume.
     """
     if DEMO:
         canned = _FIXTURES.get(demo_key or "", {}) or {}
@@ -446,49 +466,48 @@ def fetch_pages(
         return "", []
 
     listed = "\n".join(f"- {u}" for u in urls[:2])
-    resp = _create(
-        model=RESEARCH_MODEL,
-        max_tokens=max_tokens,
-        system=_system(
-            "You retrieve web pages and report their relevant contents plainly "
-            "and accurately. No commentary, no persona, no preamble."
-        ),
-        messages=[
-            {
-                "role": "user",
-                "content": (
-                    "Fetch each of these pages and summarise the parts relevant "
-                    "to the question. If a page cannot be retrieved, say so and "
-                    "move on.\n\n" + listed
-                ),
-            }
+    runnable = chat(RESEARCH_MODEL, max_tokens).bind_tools([WEB_FETCH])
+    result = _run(
+        runnable,
+        [
+            _system(
+                "You retrieve web pages and report their relevant contents plainly "
+                "and accurately. No commentary, no persona, no preamble."
+            ),
+            HumanMessage(
+                "Fetch each of these pages and summarise the parts relevant to the "
+                "question. If a page cannot be retrieved, say so and move on.\n\n"
+                + listed
+            ),
         ],
-        tools=[WEB_FETCH],
-        output_config={"effort": "low"},
+        model=RESEARCH_MODEL,
         stream=True,
+        label="fetch",
     )
-    if resp is None:
-        # Could not reach the API at all. That is not the source's fault, so it
-        # is NOT reported as a dead parrot — the council just has less to go on.
+    if result is None:
+        # Could not reach the API at all. That is not the source's fault, so it is
+        # NOT reported as a dead parrot — the council just has less to go on.
         return "", []
 
-    # A failed fetch reports error_code but a null url, so correlate back to the
-    # requested URL through the server_tool_use block that asked for it.
-    requested = _tool_use_urls(resp)
+    blocks = _blocks(result)
+    # A failed fetch reports error_code but no url, so correlate back to the URL
+    # through the server_tool_use block that asked for it.
+    requested = {
+        b.get("id"): (b.get("input") or {}).get("url")
+        for b in blocks
+        if b.get("type") == "server_tool_use" and isinstance(b.get("input"), dict)
+    }
+
     dead: list[str] = []
-    for block in resp.content:
-        if block.type != "web_fetch_tool_result":
+    for block in blocks:
+        if block.get("type") != "web_fetch_tool_result":
             continue
-        content = block.content
-        failed = getattr(content, "type", "") == "web_fetch_tool_result_error" or hasattr(
-            content, "error_code"
-        )
-        if failed:
-            url = (
-                getattr(content, "url", None)
-                or requested.get(getattr(block, "tool_use_id", ""), "")
+        content = block.get("content")
+        if isinstance(content, dict) and content.get("error_code"):
+            dead.append(
+                content.get("url")
+                or requested.get(block.get("tool_use_id"))
                 or "an unnamed source"
             )
-            dead.append(url)
 
-    return _all_text(resp).strip(), dead
+    return _text(result), dead

@@ -239,25 +239,56 @@ display is a process singleton and the indirection buys nothing.
 `InMemorySaver` would impose a `thread_id` and survive nothing. Add a
 `SqliteSaver` if you want sittings that resume after a crash.
 
-## Why there is no LangChain here
+## Tracing, and why the model calls go through LangChain
 
-The graph is LangGraph; the model calls are the `anthropic` SDK directly. There
-is no `langchain-anthropic` chat model and no `@tool`-decorated function, and
-that is not an oversight:
+The calls use `langchain-anthropic`'s `ChatAnthropic` rather than the Anthropic
+SDK directly. That is a tracing decision.
 
-**There are no client-side tools to decorate.** Web search and web fetch are
-Anthropic *server-side* tools — declared as a payload, executed on Anthropic's
-infrastructure, returned as content blocks. No function in this repository is
-ever invoked as a tool, so there is nothing for `@tool` or `bind_tools` to wrap.
+OpenInference's LangChain instrumentor — the one that covers LangGraph — builds
+its span tree from LangChain's own callback metadata and never attaches spans to
+the OpenTelemetry context. Its parenting logic uses `start_span`, not
+`start_as_current_span`, deliberately, because callbacks may run on background
+threads where a contextvar attach would be unsafe. The consequence is that an SDK
+call made inside a graph node sees no ambient span and *starts its own trace*:
+the graph and its LLM calls arrive in Arize or Phoenix as disconnected traces,
+with no per-node token cost and no way to tell which node made which call.
 
-**The raw blocks are load-bearing.** The nodes read `web_search_tool_result` and
-`web_fetch_tool_result` and, critically, their *error* variants: the Dead Parrot
-sketch fires from `url_not_accessible`, and `max_uses_exceeded` has to be told
-apart from a genuine failure. A chat-model abstraction that normalises those
-blocks into text would take the sketches with it.
+Measured, with `AnthropicInstrumentor` and the raw SDK: 11 LLM spans, all roots,
+alongside a separate `LangGraph` tree. With `ChatAnthropic` and the LangChain
+instrumentor alone:
 
-Structured outputs go through `output_config.format` with Pydantic schemas
-validated in `state.py`, which is the API's own mechanism and needs no wrapper.
+```
+132 spans, 1 root: ['LangGraph']
+ChatAnthropic  parent=RunnableParallel<raw>  model=claude-opus-5  tok=1446/71
+single unified trace : True
+LLM spans nested     : True
+per-node attribution : True
+```
+
+One trace, one instrumentor, and each LLM span sits under the node that made it.
+No instrumentation is installed here — this only means it works if you add some.
+
+**Nothing was given up for it.** That was checked before the change rather than
+after: `web_search_tool_result` blocks keep their URLs, `web_fetch` errors keep
+`url_not_accessible` (so the Dead Parrot sketch still fires), `max_uses_exceeded`
+is still distinguishable from a real failure, prompt caching still reports cache
+reads, `with_structured_output` validates the same Pydantic schemas, and
+streaming still returns the tool result blocks — which matters, because both
+research turns stream to survive long server-side tool loops.
+
+Two things that did need care:
+
+- `usage_metadata["input_tokens"]` is the **total** including cached tokens,
+  where the raw SDK reports only the uncached portion. The ledger subtracts them,
+  or a cached sitting is costed at roughly ten times what it cost.
+- `server_tool_use` counts live in `response_metadata["usage"]` on a normal
+  reply but are **absent from a streamed one**. They are counted from the content
+  blocks instead, filtered by tool name because the `_20260209` tools also emit
+  `code_execution` server-tool blocks for their own dynamic filtering.
+
+**There are still no client-side tools**, so there is nothing for `@tool` to
+decorate. Web search and fetch execute on Anthropic's infrastructure; the tool
+payloads are passed straight through `bind_tools`.
 
 ## Layout
 
