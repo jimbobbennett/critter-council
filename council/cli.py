@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -29,6 +30,100 @@ from .ui.layout import Display, ScrollBox
 
 ROOT = Path(__file__).resolve().parent.parent
 MIN_WIDTH = 92
+
+
+def real_terminal_size() -> tuple[int, int] | None:
+    """The terminal's own size, via ioctl.
+
+    Rich prefers the COLUMNS/LINES environment variables when they are set, and
+    a stale value (an unnoticed resize, a multiplexer, a script that exported it)
+    makes every width calculation wrong — lines are computed for one width and
+    rendered at another, so they wrap. The ioctl is the authority.
+    """
+    for stream in (sys.stdout, sys.stderr, sys.stdin):
+        try:
+            size = os.get_terminal_size(stream.fileno())
+        except (OSError, ValueError, AttributeError):
+            continue
+        if size.columns > 0 and size.lines > 0:
+            return size.columns, size.lines
+    return None
+
+
+def make_console() -> Console:
+    """A Console pinned to the terminal's actual size."""
+    size = real_terminal_size()
+    if size is None:
+        return Console()
+    return Console(width=size[0], height=size[1])
+
+
+def doctor(console: Console) -> int:
+    """Report what the app thinks your terminal is, and check the invariants."""
+    from rich.cells import cell_len
+
+    from .ui import minutes as m
+    from .ui.layout import Display, ScrollBox
+
+    ioctl = real_terminal_size()
+    console.print()
+    console.print("[bold]Terminal detection[/bold]")
+    console.print(f"  ioctl (authoritative) : {ioctl[0]} x {ioctl[1]}" if ioctl
+                  else "  ioctl                 : unavailable (not a terminal)")
+    console.print(f"  COLUMNS / LINES env   : "
+                  f"{os.environ.get('COLUMNS', 'unset')} / {os.environ.get('LINES', 'unset')}")
+    console.print(f"  Rich is using         : {console.width} x {console.size.height}")
+    if ioctl and (console.width != ioctl[0] or console.size.height != ioctl[1]):
+        console.print("  [red]MISMATCH — stale COLUMNS/LINES would break every "
+                      "width calculation[/red]")
+    else:
+        console.print("  [green]consistent[/green]")
+
+    sample = {
+        "motion": "why do onions make you cry?",
+        "minutes": "RESOLVED\n\n" + "\n\n".join(
+            f"{i}. That the matter is thus, for reasons of some length and detail, "
+            "including an em-dash — and a long unbroken "
+            "https://example.org/a/very/long/path/that/will/not/wrap/nicely/at/all"
+            for i in range(1, 6)),
+        "votes": [{"critter": "Toad", "vote": "aye", "because": "it ends the meeting"}],
+        "sources": [{"title": "T" * 90, "url": "https://example.org/" + "x" * 90}] * 20,
+        "dead_parrots": [], "forms": [1] * 6, "tea": 12,
+    }
+
+    console.print()
+    console.print("[bold]Layout invariants[/bold]")
+    with console.capture() as cap:
+        m.render_digest(console, sample, 447)
+    rows = cap.get().rstrip("\n").split("\n")
+    checks = [
+        ("digest fits the window", len(rows) <= console.size.height,
+         f"{len(rows)} rows / {console.size.height}"),
+        ("no row wider than terminal", max(cell_len(r) for r in rows) <= console.width,
+         f"widest {max(cell_len(r) for r in rows)} / {console.width}"),
+        ("no row at exactly full width",
+         not any(cell_len(r) == console.width for r in rows),
+         f"{sum(1 for r in rows if cell_len(r) == console.width)} such rows"),
+        ("no trailing whitespace", not any(r != r.rstrip() for r in rows),
+         f"{sum(1 for r in rows if r != r.rstrip())} such rows"),
+    ]
+    d = Display("m", width=console.width - 1)
+    lines = m.scroll_lines(sample, console.width - 1)
+    d.show_scroll(ScrollBox("MINUTES", lines, height=max(4, console.size.height - 8)))
+    with console.capture() as cap:
+        console.print(d)
+    prows = cap.get().rstrip("\n").split("\n")
+    checks += [
+        ("panel fits the window", len(prows) <= console.size.height,
+         f"{len(prows)} rows / {console.size.height}"),
+        ("panel no row too wide", max(cell_len(r) for r in prows) <= console.width,
+         f"widest {max(cell_len(r) for r in prows)} / {console.width}"),
+    ]
+    for name, ok, detail in checks:
+        mark = "[green]PASS[/green]" if ok else "[red]FAIL[/red]"
+        console.print(f"  {mark}  {name:<30} {detail}")
+    console.print()
+    return 0 if all(ok for _, ok, _ in checks) else 1
 
 
 def read_key() -> str:
@@ -158,6 +253,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     p.add_argument("--sitting", type=int, default=447, help="sitting number, for flavour")
     p.add_argument("--cast", action="store_true", help="introduce the cast and exit")
+    p.add_argument(
+        "--doctor",
+        action="store_true",
+        help="report terminal detection and check the layout invariants, then exit",
+    )
     p.add_argument(
         "--quick",
         action="store_true",
@@ -336,7 +436,10 @@ def run_sitting(
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     load_dotenv(ROOT / ".env")
-    console = Console()
+    console = make_console()
+
+    if args.doctor:
+        return doctor(console)
 
     if args.model:
         llm.MODEL = args.model

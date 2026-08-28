@@ -76,6 +76,19 @@ This is the part worth reading before you change anything:
 - **Buzzwick's abstention** is enforced in Python, not left to the model, because
   the gag has to land every single sitting.
 
+## If the layout looks wrong
+
+```bash
+council --doctor
+```
+
+It reports the terminal size three ways — the ioctl (authoritative), the
+`COLUMNS`/`LINES` environment variables, and what Rich is using — then checks the
+layout invariants. A stale `COLUMNS` is the classic cause of text wrapping by a
+character: lines get computed for one width and rendered at another. The app now
+prefers the ioctl for exactly that reason, so a mismatch is reported rather than
+silently breaking the output.
+
 ## Requirements
 
 - Python 3.11+
@@ -109,6 +122,7 @@ council --quick                       # one search round, about half the cost
 council --model claude-sonnet-5       # cheaper voice model
 council --research-model claude-opus-5  # spend more on the research turns
 council --cast                        # introduce the cast and exit
+council --doctor                      # check terminal detection and layout
 council --once                        # adjourn after one motion, no AOB
 ```
 
