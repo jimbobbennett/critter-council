@@ -197,12 +197,32 @@ def show_cast(console: Console, speed: float) -> None:
     console.print()
 
 
+def drain_stdin() -> None:
+    """Discard anything typed but not yet read.
+
+    Without this, a keypress meant for something else decides the next prompt.
+    The pager is the common case: quitting it with `q` and a reflexive Enter
+    leaves that Enter in the buffer, the "any other business" prompt reads it as
+    a blank answer, and the council adjourns without the user asking it to.
+    Keys typed during the sitting itself do the same thing.
+    """
+    if not sys.stdin.isatty():
+        return
+    try:
+        import termios
+
+        termios.tcflush(sys.stdin.fileno(), termios.TCIFLUSH)
+    except Exception:
+        pass
+
+
 def _prompt(console: Console) -> str:
     """Ask for a motion, treating EOF and Ctrl-C as "adjourn".
 
     Prompt.ask raises EOFError on a closed stdin, which would otherwise dump a
     traceback on any non-interactive run (cron, CI, `< /dev/null`).
     """
+    drain_stdin()
     try:
         return Prompt.ask(
             "  [bold green]MOTION[/bold green]", default="", show_default=False
@@ -228,6 +248,9 @@ def ask_briefly(console: Console, question: str) -> str:
             border_style="green",
             padding=(0, 1),
         )
+    )
+    console.print(
+        "  [grey42]Type another motion, or press Enter on its own to adjourn.[/grey42]"
     )
     return _prompt(console)
 
