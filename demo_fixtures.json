@@ -1,0 +1,211 @@
+{
+  "_README": "Canned data for `council --demo`. No API calls are made in demo mode. The behavioural claims below are real, well-established explanations of the behaviour; the CITATIONS ARE FICTIONAL and use .example.org deliberately, so canned demo data can never be mistaken for genuine sources. For real, cited research, run the council without --demo.",
+  "motion": "why do cats knock things off tables?",
+  "chair_0": {
+    "remark": "Order. The motion before us concerns cats and their disregard for gravity. Nigel, you have the floor, God help us all."
+  },
+  "chair_1": {
+    "remark": "A cunning plan of two out of ten, Nigel, which is generous of you. Professor, assess whatever it is he has dragged in."
+  },
+  "chair_2": {
+    "remark": "Contradictory sources. Marvellous. I had so hoped this sitting would be brief."
+  },
+  "chair_3": {
+    "remark": "Nobody expected that, Cardinal, which I believe was rather the point. Sergeant, your forms."
+  },
+  "chair_4": {
+    "remark": "Then we go round again. Nigel, do try to find something that is still alive this time."
+  },
+  "scout_1": {
+    "plan": "I have a cunning plan, m'lord: we type the question into the internet.",
+    "cunning_rating": 2,
+    "queries": [
+      "why do cats push objects off tables",
+      "cat pawing behaviour explanation"
+    ]
+  },
+  "scout_2": {
+    "plan": "An even cunninger plan, m'lord: we type it in again, but harder.",
+    "cunning_rating": 4,
+    "queries": [
+      "cat predatory play behaviour objects",
+      "feline attention seeking behaviour research"
+    ]
+  },
+  "scout_3": {
+    "plan": "My most cunning plan yet: we ask a cat. I concede there are difficulties.",
+    "cunning_rating": 7,
+    "queries": [
+      "feline whisker paw sensitivity object testing"
+    ]
+  },
+  "owl_1": {
+    "quip": "Two sources of substance and one that has clearly given up on life entirely.",
+    "findings": [
+      {
+        "claim": "Cats investigate unfamiliar objects by touching and batting them, because their paw pads carry dense mechanoreceptors that return information about weight, texture and stability.",
+        "source_url": "https://journal-of-feline-mischief.example.org/vol12/paw-testing",
+        "simile": "as solid as a source can be while still being about cats"
+      },
+      {
+        "claim": "Batting at a small object reproduces part of a predatory sequence; an object that moves when struck rewards the behaviour and invites repetition.",
+        "source_url": "https://parish-veterinary-review.example.org/notes/predatory-play",
+        "simile": "about as rigorous as a pub quiz, but not actually wrong"
+      }
+    ],
+    "contradictions": [
+      {
+        "subject": "whether the behaviour is deliberate attention-seeking",
+        "one_says": "the cat has learned that knocking things over summons a human",
+        "other_says": "the cat has no such theory of mind and is simply batting at things"
+      }
+    ]
+  },
+  "owl_2": {
+    "quip": "Better. Still nothing here that would survive a determined undergraduate.",
+    "findings": [
+      {
+        "claim": "Where a human reliably reacts, the behaviour is reinforced and becomes more frequent, which is learning rather than malice.",
+        "source_url": "https://institute-of-tabby-studies.example.org/1998/attention",
+        "simile": "as trustworthy as a chocolate teapot in a sauna, yet somehow correct"
+      },
+      {
+        "claim": "Table edges concentrate the behaviour because an object at an edge can be displaced with minimal effort and produces a large, satisfying result.",
+        "source_url": "https://journal-of-feline-mischief.example.org/vol12/paw-testing",
+        "simile": "as balanced as a one-legged flamingo at a disco"
+      },
+      {
+        "claim": "The three explanations are not rivals; most observed instances are some combination of tactile investigation, play, and learned consequence.",
+        "source_url": "https://parish-veterinary-review.example.org/notes/predatory-play",
+        "simile": "as cautious as a solicitor at a wedding"
+      }
+    ],
+    "contradictions": []
+  },
+  "owl_3": {
+    "quip": "I decline to assess this. It is not evidence, it is anecdote in a cardigan.",
+    "findings": [],
+    "contradictions": []
+  },
+  "buzz_1": {
+    "quip": "I've drawn up a timetable. The first four hours are for drawing up the timetable.",
+    "verdicts": [
+      {
+        "claim_index": 0,
+        "claim": "Cats investigate unfamiliar objects by touching and batting them.",
+        "verdict": "verified",
+        "form_number": "Form 27B/6",
+        "remark": "Supported by the retrieved page. Stamped."
+      },
+      {
+        "claim_index": 1,
+        "claim": "Batting at a small object reproduces part of a predatory sequence.",
+        "verdict": "blocked",
+        "form_number": "Schedule 9, Annexe C",
+        "remark": "Cannot proceed: the corroborating source is deceased."
+      }
+    ]
+  },
+  "buzz_2": {
+    "quip": "Three claims, three stamps. This is the finest afternoon I have had in years.",
+    "verdicts": [
+      {
+        "claim_index": 0,
+        "claim": "Where a human reliably reacts, the behaviour is reinforced.",
+        "verdict": "verified",
+        "form_number": "Form 12A stroke 4",
+        "remark": "Consistent across two sources. Stamped."
+      },
+      {
+        "claim_index": 1,
+        "claim": "Table edges concentrate the behaviour.",
+        "verdict": "verified",
+        "form_number": "Form 12A stroke 5",
+        "remark": "Mechanically plausible and attested. Stamped."
+      },
+      {
+        "claim_index": 2,
+        "claim": "The three explanations are not rivals but overlap in most instances.",
+        "verdict": "verified",
+        "form_number": "Form 31, Part II",
+        "remark": "The only sensible thing said all sitting. Stamped, reluctantly."
+      }
+    ]
+  },
+  "buzz_3": {
+    "quip": "Nothing before me. I shall file that fact, for completeness.",
+    "verdicts": []
+  },
+  "minutes": "RESOLVED\n\n1. That cats bat at and displace small objects primarily as tactile investigation. The paw pads carry dense mechanoreceptors, so a push returns information about an object's weight, texture and stability that the eye alone cannot supply.\n\n2. That the same motion reproduces a fragment of a predatory sequence. An object that skitters when struck rewards the strike, and a rewarded strike is repeated — the cat is not hunting your mug so much as rehearsing on it.\n\n3. That where a human reliably reacts, the behaviour is reinforced and becomes more frequent. This council finds this to be learning rather than malice, though it notes the distinction is of limited comfort at four in the morning.\n\n4. That table edges concentrate the behaviour for the unremarkable reason that an object at an edge can be displaced with minimal effort and maximal result. Cats are not spiteful. They are efficient.\n\n5. That these explanations are not rivals. Most observed instances are some combination of the three, and any source claiming a single cause should be read with a raised eyebrow.\n\nNOTED\n\n1. That one source was pronounced deceased mid-sitting and eulogised at length by Professor Owlsworth, who appeared to enjoy it.\n\n2. That the Cardinal's intervention, while unexpected by all present, did resolve the contradiction. Five forms were filed. The urn ran dry once.\n\nANY OTHER BUSINESS\n\n1. The parish hall's folding chair with the short leg remains unrepaired for the eleventh consecutive sitting. The Chair has stopped raising it.",
+  "votes": {
+    "votes": [
+      {
+        "critter": "Nigel",
+        "vote": "aye",
+        "because": "Voting with the Chairman, m'lord, as is my cunning custom."
+      },
+      {
+        "critter": "Prof. Owlsworth",
+        "vote": "aye",
+        "because": "Aye, with a caveat regarding item four that nobody will read."
+      },
+      {
+        "critter": "Sgt. Buzzwick",
+        "vote": "abstain",
+        "because": "Abstaining pending receipt of a stamped Form 27B/6."
+      },
+      {
+        "critter": "Foxy",
+        "vote": "aye",
+        "because": "I wrote it, darling. It is superb. Obviously aye."
+      },
+      {
+        "critter": "Chairman Toad",
+        "vote": "aye",
+        "because": "Aye, on the sole ground that it ends the meeting."
+      }
+    ]
+  },
+  "search_1": {
+    "digest": "Sources broadly converge on three explanations. First, paw-testing: cats have highly sensitive paw pads and investigate unfamiliar objects by touching, batting, and pushing them. Second, predatory play: batting at small objects mimics the pattern used on prey, and an object that moves when struck rewards the behaviour. Third, learned attention-seeking: if knocking an object off a surface reliably produces a human reaction, the behaviour is reinforced. Sources disagree on which is dominant, and on whether the behaviour should be described as deliberate attention-seeking at all.",
+    "sources": [
+      {
+        "url": "https://journal-of-feline-mischief.example.org/vol12/paw-testing",
+        "title": "Paw-testing and tactile investigation in domestic cats (FICTIONAL demo source)",
+        "snippet": ""
+      },
+      {
+        "url": "https://parish-veterinary-review.example.org/notes/predatory-play",
+        "title": "Predatory play sequences and object manipulation (FICTIONAL demo source)",
+        "snippet": ""
+      },
+      {
+        "url": "https://cattery-quarterly.example.org/archive/gone",
+        "title": "On the moral character of the shorthair (FICTIONAL, deceased)",
+        "snippet": ""
+      }
+    ],
+    "notes": []
+  },
+  "search_2": {
+    "digest": "A second pass surfaced work on reinforcement and on why table edges in particular attract the behaviour. These sources agree with the first pass and add that the three explanations usually overlap rather than compete.",
+    "sources": [
+      {
+        "url": "https://institute-of-tabby-studies.example.org/1998/attention",
+        "title": "Reinforcement of attention-seeking behaviours (FICTIONAL demo source)",
+        "snippet": ""
+      }
+    ],
+    "notes": []
+  },
+  "fetch_1": {
+    "text": "Retrieved two of three pages. Paw-testing is described as tactile investigation: the paw pads carry dense mechanoreceptors, so batting an object returns information about its weight, texture and stability. Predatory play is described as an incomplete hunting sequence directed at a substitute target. The third page could not be retrieved.",
+    "dead": [
+      "https://cattery-quarterly.example.org/archive/gone"
+    ]
+  },
+  "fetch_2": {
+    "text": "Retrieved successfully. Describes reinforcement of the behaviour by human reaction, and notes that objects at a table edge are displaced with the least effort for the greatest effect.",
+    "dead": []
+  }
+}
