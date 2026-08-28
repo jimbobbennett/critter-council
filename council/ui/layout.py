@@ -220,7 +220,13 @@ class Display:
         )
         border = p.colour if p.state in ("working", "talking") else "grey30"
         return Panel(
-            Group(head, self._bubble(p), Text(p.stats or " ", style="dim")),
+            Group(
+                head,
+                self._bubble(p),
+                # no_wrap: a stats line that wraps grows the panel a row taller
+                # than its neighbour and breaks the grid alignment.
+                Text(p.stats or " ", style="dim", no_wrap=True, overflow="ellipsis"),
+            ),
             title=f"{p.icon} {p.name}",
             title_align="left",
             border_style=border,

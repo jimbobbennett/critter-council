@@ -16,6 +16,114 @@ seats, and Chairman Toad puts the question to you himself. After each sitting he
 calls for any other business, so one invocation can run several motions; a blank
 answer adjourns.
 
+## What it looks like
+
+The chamber, mid-sitting. Nigel is searching, Owlsworth has filed his assessment,
+Buzzwick is on his fifth form, and the tea is going down. The header carries a
+live cost meter straight off the API usage figures.
+
+```
+╔═════════════════════════════════════════════════════════════════════════════════════════════════╗
+║ THE RIGHT HONOURABLE COUNCIL OF CRITTERS                                 🫖 TEA ▓▓▓▓▓▓▓░░░  68% ║
+║ Sitting #447                                                     round 2/3   3 searches  ~$0.21 ║
+║ MOTION: "why do cats knock things off tables?"                                                  ║
+╚═════════════════════════════════════════════════════════════════════════════════════════════════╝
+╭─ 🐿 NIGEL (Scout) ──────────────────────────────╮╭─ 🦉 PROF. OWLSWORTH ──────────────────────────╮
+│   (\__/)    ● ○ ○                              ││    ,___,    ✓ ✓ ✓                             │
+│   ( o.o )   searching the internet             ││   ( O,O )   assessment filed                  │
+│    c( )>                                       ││    /)_)                                       │
+│ ╭────────────────────────────────────────────╮ ││ ╭───────────────────────────────────────────╮ │
+│ │ I have a cunning plan, m'lord: we type the │ ││ │ Two sources of substance and one that has │ │
+│ │ question into the internet.                │ ││ │ clearly given up on life entirely.        │ │
+│ │                                            │ ││ │                                           │ │
+│ │                                            │ ││ │                                           │ │
+│ ╰────────────────────────────────────────────╯ ││ ╰───────────────────────────────────────────╯ │
+│ Cunning Rating: 2/10    sources found: 9       ││ findings: 3    clashes: 1    deceased: 1      │
+╰────────────────────────────────────────────────╯╰───────────────────────────────────────────────╯
+╭─ 🐝 SGT. BUZZWICK ─────────────────────────────╮╭─ 🦊 FOXY (Clerk) ─────────────────────────────╮
+│    \ | /    ○ ○ ○                              ││   /\ _ /\   ○ ○ ○                             │
+│   ( o.o )   in triplicate                      ││  (  ^.^  )  waiting                           │
+│   (#####)                                      ││    > ^ <                                      │
+│ ╭────────────────────────────────────────────╮ ││ ╭───────────────────────────────────────────╮ │
+│ │ I've drawn up a timetable. The first four  │ ││ │ Wake me when there is something worth     │ │
+│ │ hours are for drawing up the timetable.    │ ││ │ writing, darlings.                        │ │
+│ │                                            │ ││ │                                           │ │
+│ │                                            │ ││ │                                           │ │
+│ ╰────────────────────────────────────────────╯ ││ ╰───────────────────────────────────────────╯ │
+│ forms filed: 5    verified: 4    blocked: 1    ││                                               │
+╰────────────────────────────────────────────────╯╰───────────────────────────────────────────────╯
+╭─ 🐸 CHAIRMAN TOAD, presiding ───────────────────────────────────────────────────────────────────╮
+│    @..@      "A cunning plan of two out of ten, Nigel, which is generous of you.         __/\   │
+│   (-oo-)     Professor, assess whatever it is he has dragged in."                       /___/   │
+│  ( >__< )                                                                              ___|__   │
+╰─────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+When two sources genuinely disagree, a conditional edge fires and Cardinal
+Ximenez takes over the chamber for a few seconds:
+
+```
+╔══════════════════════════════════════ ⚠  CARDINAL XIMENEZ ══════════════════════════════════════╗
+║                                                                                                 ║
+║      _+_                                                                                        ║
+║    ( O.O )                                                                                      ║
+║    </|_|\>                                                                                      ║
+║                                                                                                 ║
+║  NOBODY EXPECTS THE CONTRADICTORY SOURCE!                                                       ║
+║                                                                                                 ║
+║  Our three chief weapons are citation, cross-reference, and a fanatical devotion to the         ║
+║  footnote!                                                                                      ║
+║                                                                                                 ║
+║  ON THE SUBJECT OF: whether the behaviour is deliberate attention-seeking                       ║
+║    One source maintains: the cat has learned that knocking things over summons a human          ║
+║    Another insists:     the cat has no such theory of mind                                      ║
+║                                                                                                 ║
+║  Fetch... THE COMFY CHAIR. And a second opinion.                                                ║
+╚═════════════════════════════════════════════════════════════════════════════════════════════════╝
+```
+
+Then Foxy's Minutes, rendered as Markdown and opened in your pager:
+
+```
+                                    Minutes of the 447th Sitting
+
+Motion: "why do cats knock things off tables?"
+
+Resolved
+
+ 1 That cats bat at and displace small objects primarily as tactile investigation. The paw pads
+   carry dense mechanoreceptors, so a push returns information about an object's weight, texture and
+   stability that the eye alone cannot supply.
+ 2 That the same motion reproduces a fragment of a predatory sequence — an object that skitters when
+   struck rewards the strike, and a rewarded strike is repeated.
+
+Noted
+
+ 1 That one source was pronounced deceased mid-sitting and eulogised at length by Professor
+   Owlsworth, who appeared to enjoy it.
+
+The Division
+
+
+ Member         Vote     Reason
+ ──────────────────────────────────────────────────────────────────────────
+ Nigel          Aye      Voting with the Chairman, as is my cunning custom.
+ Sgt. Buzzwick  Abstain  Pending receipt of a stamped Form 27B/6.
+
+
+Ayes 1, Noes 0, Abstentions 1. The motion is carried.
+
+----------------------------------------------------------------------------------------------------
+
+Sources consulted 0 · deceased 0 · forms filed 5 · tea remaining 54%
+
+6 model calls · 0 in (0 cached) · 0 out · 3 searches, 2 fetches · ~$0.21
+```
+
+Every frame above is captured from the real renderer at 100 columns rather than
+drawn by hand — generating them is how the stats line was found to wrap and
+break the grid alignment.
+
 ## Reading the result
 
 When the sitting ends, Foxy's Minutes are written as Markdown, rendered by Rich,
