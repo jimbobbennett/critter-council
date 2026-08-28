@@ -209,6 +209,56 @@ if it were evidence. `SEARCH_BUDGET` / `FETCH_BUDGET` in `llm.py`; the researche
 prompt is also told the budget exists and told never to write about its own
 tools. Fixing this made a sitting both better *and* cheaper.
 
+## LangGraph conventions
+
+Worth knowing if you are reading this as a LangGraph example, because a few
+choices are deliberate rather than accidental.
+
+**State.** A `TypedDict` with `Annotated[..., operator.add]` reducers, which is
+the canonical typed-state pattern. Append-only channels carry the reducer;
+anything that gets cleared or replaced (`contradictions`, `tea`, `round`) is a
+plain key, so last-write-wins and the node returns the whole value. Getting that
+distinction wrong is how the inquisition ended up unable to clear its own
+contradictions in an early version.
+
+**Supervisor.** One router node with `add_conditional_edges`, and every worker
+edged back to it — the documented supervisor topology. `Command(goto=...)` would
+also work and would let a node route itself, but keeping every routing decision
+in one function is worth more here than saving an edge.
+
+**Termination.** `recursion_limit` is a backstop, not a budget. `MAX_STEPS`
+bounds the sitting, so the limit should never be reached; if it ever is, that is
+a routing bug rather than a number to raise.
+
+**Runtime dependencies.** The live display is injected by closing over
+`build_graph`. LangGraph 1.x offers `context_schema` with a `Runtime` argument
+per node, which is the more explicit idiom; the closure is used because the
+display is a process singleton and the indirection buys nothing.
+
+**No checkpointer**, deliberately. A sitting is one interactive run, so an
+`InMemorySaver` would impose a `thread_id` and survive nothing. Add a
+`SqliteSaver` if you want sittings that resume after a crash.
+
+## Why there is no LangChain here
+
+The graph is LangGraph; the model calls are the `anthropic` SDK directly. There
+is no `langchain-anthropic` chat model and no `@tool`-decorated function, and
+that is not an oversight:
+
+**There are no client-side tools to decorate.** Web search and web fetch are
+Anthropic *server-side* tools — declared as a payload, executed on Anthropic's
+infrastructure, returned as content blocks. No function in this repository is
+ever invoked as a tool, so there is nothing for `@tool` or `bind_tools` to wrap.
+
+**The raw blocks are load-bearing.** The nodes read `web_search_tool_result` and
+`web_fetch_tool_result` and, critically, their *error* variants: the Dead Parrot
+sketch fires from `url_not_accessible`, and `max_uses_exceeded` has to be told
+apart from a genuine failure. A chat-model abstraction that normalises those
+blocks into text would take the sketches with it.
+
+Structured outputs go through `output_config.format` with Pydantic schemas
+validated in `state.py`, which is the API's own mechanism and needs no wrapper.
+
 ## Layout
 
 ```

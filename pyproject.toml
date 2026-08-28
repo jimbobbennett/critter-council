@@ -3,12 +3,17 @@ name = "critter-council"
 version = "0.4.7"
 description = "A shambolic parish committee of woodland animals researches your question. A LangGraph demo."
 requires-python = ">=3.11"
+# Lower bounds are the versions whose APIs this actually uses, not the oldest
+# that happens to import. langgraph 0.x and anthropic 0.x are different APIs:
+# 0.2 predates the graph surface used here, and the Anthropic SDK needs 1.x for
+# output_config structured outputs and the web_search_20260209 tool. uv.lock is
+# committed, so `uv sync` installs the exact versions this was tested against.
 dependencies = [
-    "langgraph>=0.2.0",
-    "anthropic>=0.69.0",
-    "rich>=13.7.0",
-    "python-dotenv>=1.0.0",
-    "pydantic>=2.7.0",
+    "langgraph>=1.0,<2",
+    "anthropic>=1.0,<2",
+    "rich>=13.7",
+    "python-dotenv>=1.0",
+    "pydantic>=2.7",
 ]
 
 [project.scripts]
