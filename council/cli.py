@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -58,9 +59,23 @@ def make_console() -> Console:
     return Console(width=size[0], height=size[1])
 
 
+# Style codes are zero-width on screen but real characters in a captured string.
+# Measuring a capture without stripping them counts colour as content and reports
+# a width the terminal never draws.
+_ANSI = re.compile(r"\x1b(?:\[[0-9;?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\)|[@-Z\\-_])")
+
+
+def _visible(text: str) -> str:
+    """The part of a rendered row the terminal actually draws."""
+    return _ANSI.sub("", text)
+
+
 def doctor(console: Console) -> int:
     """Report what the app thinks your terminal is, and check the invariants."""
     from rich.cells import cell_len
+
+    def widest(rows: list[str]) -> int:
+        return max((cell_len(_visible(r)) for r in rows), default=0)
 
     from .ui import minutes as m
     from .ui.layout import Display, ScrollBox
@@ -99,13 +114,14 @@ def doctor(console: Console) -> int:
     checks = [
         ("digest fits the window", len(rows) <= console.size.height,
          f"{len(rows)} rows / {console.size.height}"),
-        ("no row wider than terminal", max(cell_len(r) for r in rows) <= console.width,
-         f"widest {max(cell_len(r) for r in rows)} / {console.width}"),
+        ("no row wider than terminal", widest(rows) <= console.width,
+         f"widest {widest(rows)} / {console.width}"),
         ("no row at exactly full width",
-         not any(cell_len(r) == console.width for r in rows),
-         f"{sum(1 for r in rows if cell_len(r) == console.width)} such rows"),
-        ("no trailing whitespace", not any(r != r.rstrip() for r in rows),
-         f"{sum(1 for r in rows if r != r.rstrip())} such rows"),
+         not any(cell_len(_visible(r)) == console.width for r in rows),
+         f"{sum(1 for r in rows if cell_len(_visible(r)) == console.width)} such rows"),
+        ("no trailing whitespace",
+         not any(_visible(r) != _visible(r).rstrip() for r in rows),
+         f"{sum(1 for r in rows if _visible(r) != _visible(r).rstrip())} such rows"),
     ]
     d = Display("m", width=console.width - 1)
     lines = m.scroll_lines(sample, console.width - 1)
@@ -116,12 +132,21 @@ def doctor(console: Console) -> int:
     checks += [
         ("panel fits the window", len(prows) <= console.size.height,
          f"{len(prows)} rows / {console.size.height}"),
-        ("panel no row too wide", max(cell_len(r) for r in prows) <= console.width,
-         f"widest {max(cell_len(r) for r in prows)} / {console.width}"),
+        ("panel no row too wide", widest(prows) <= console.width,
+         f"widest {widest(prows)} / {console.width}"),
     ]
     for name, ok, detail in checks:
         mark = "[green]PASS[/green]" if ok else "[red]FAIL[/red]"
         console.print(f"  {mark}  {name:<30} {detail}")
+
+    if not all(ok for _, ok, _ in checks):
+        console.print()
+        console.print("[bold]Widest rows, as the terminal draws them[/bold]")
+        for label, rs in (("digest", rows), ("panel", prows)):
+            worst = max(rs, key=lambda r: cell_len(_visible(r)))
+            vis = _visible(worst)
+            console.print(f"  {label} ({cell_len(vis)} cells):")
+            console.print(Text("  |" + vis + "|", style="grey54"))
     console.print()
     return 0 if all(ok for _, ok, _ in checks) else 1
 
