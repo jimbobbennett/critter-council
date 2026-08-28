@@ -63,13 +63,32 @@ def read_key() -> str:
     return ch
 
 
+def drain_stdin() -> None:
+    """Throw away anything already typed but not yet read.
+
+    The terminal buffers keystrokes during the sitting, and the panel's key loop
+    would consume them the instant it opens: a stray space is a page-down (so the
+    Minutes appear to start partway in), a stray Enter closes the panel before it
+    is seen, and whatever is left leaks to the shell on exit.
+    """
+    try:
+        import termios
+
+        termios.tcflush(sys.stdin.fileno(), termios.TCIFLUSH)
+    except Exception:
+        pass
+
+
 def browse_minutes(display: Display, console: Console, final: dict) -> None:
     """Show the Minutes as a scrollable panel inside the chamber.
 
     Non-interactive stdin (a pipe, CI) gets one static frame and moves on, so
     this never blocks a scripted run.
     """
-    height = max(8, console.size.height - 8)
+    # header is 5 rows, the panel adds 2 borders, and one row is left spare so
+    # writing the last cell can't scroll the terminal. Floor is low enough that a
+    # very short window shrinks the panel rather than overflowing it.
+    height = max(4, console.size.height - 8)
     box = ScrollBox(
         title="MINUTES OF THE SITTING",
         lines=minutes_ui.scroll_lines(final, console.width),
@@ -81,6 +100,10 @@ def browse_minutes(display: Display, console: Console, final: dict) -> None:
         display.beat(2.0)
         display.close_scroll()
         return
+
+    # Start from a clean input buffer, and start at the top of the document.
+    drain_stdin()
+    display.scroll_to("top")
 
     # Note: the panel is deliberately left up on exit rather than closed here.
     # Live tears down immediately after this returns, so closing it first would
@@ -103,6 +126,9 @@ def browse_minutes(display: Display, console: Console, final: dict) -> None:
             display.scroll_to("top")
         elif key == "G":
             display.scroll_to("end")
+
+    # Don't let unread keypresses spill onto the shell prompt after teardown.
+    drain_stdin()
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:

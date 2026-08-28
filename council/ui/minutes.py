@@ -21,16 +21,25 @@ HEADINGS = ("RESOLVED", "NOTED", "ANY OTHER BUSINESS")
 
 
 def scroll_lines(state: dict, width: int) -> list[tuple[str, str]]:
-    """Everything worth reading, as (text, style) pairs, wrapped to `width`."""
-    w = max(30, width - 10)
+    """Everything worth reading, as (text, style) pairs, wrapped to `width`.
+
+    The panel renders one screen row per item in this list, so the wrapping here
+    must match the panel's real text column: 2 border + 4 padding + 1 scrollbar,
+    with a character of slack.
+    """
+    w = max(24, width - 8)
     out: list[tuple[str, str]] = []
 
-    def add(text: str = "", style: str = "white", indent: str = "") -> None:
+    def add(
+        text: str = "", style: str = "white", indent: str = "", hang: str | None = None
+    ) -> None:
+        """`hang` is the continuation indent — without it, wrapped lines sit
+        underneath the list number instead of the text, which reads as broken."""
         if not text:
             out.append(("", style))
             return
         for line in textwrap.wrap(
-            text, w, initial_indent=indent, subsequent_indent=indent
+            text, w, initial_indent=indent, subsequent_indent=hang if hang is not None else indent
         ) or [""]:
             out.append((line, style))
 
@@ -48,7 +57,13 @@ def scroll_lines(state: dict, width: int) -> list[tuple[str, str]]:
                 add(stripped, "bold bright_white")
                 add("─" * min(w, len(stripped) + 24), "grey30")
             else:
-                add(stripped, "white", indent="  " if stripped[0].isdigit() else "")
+                numbered = stripped[0].isdigit()
+                add(
+                    stripped,
+                    "white",
+                    indent="  " if numbered else "",
+                    hang="     " if numbered else "  ",
+                )
     else:
         add("The council failed to produce minutes. Toad blames Nigel.", "italic red")
 
@@ -63,6 +78,7 @@ def scroll_lines(state: dict, width: int) -> list[tuple[str, str]]:
             add(
                 f"{v.get('critter', '?'):<18} {choice.upper():<8} {v.get('because', '')}",
                 style,
+                hang=" " * 28,
             )
         ayes = sum(1 for v in votes if v.get("vote") == "aye")
         nays = sum(1 for v in votes if v.get("vote") == "nay")
@@ -78,7 +94,7 @@ def scroll_lines(state: dict, width: int) -> list[tuple[str, str]]:
         add("SCHEDULE A — SOURCES CONSULTED", "bold bright_white")
         add("─" * min(w, 36), "grey30")
         for s in sources:
-            add(s.get("title", "") or s.get("url", ""), "white")
+            add(s.get("title", "") or s.get("url", ""), "white", hang="   ")
             add(s.get("url", ""), "blue", indent="   ")
 
     dead = state.get("dead_parrots") or []

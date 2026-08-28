@@ -385,8 +385,13 @@ class Display:
         thumb_len = max(1, round(sb.height * sb.height / total))
         thumb_at = round(sb.offset * sb.height / total)
 
+        # no_wrap is load-bearing: the panel is a fixed height and each list
+        # entry must occupy exactly one screen row. If Rich were allowed to wrap
+        # a long line into two rows, the body would grow past the panel height,
+        # the panel past the screen, and the terminal would scroll the top of the
+        # Minutes out of view — which looks like the document starting partway in.
         body = Table.grid(expand=True)
-        body.add_column(ratio=1, overflow="crop")
+        body.add_column(ratio=1, no_wrap=True, overflow="ellipsis")
         body.add_column(width=1, no_wrap=True)
         for i in range(sb.height):
             text, style = window[i] if i < len(window) else ("", "")
