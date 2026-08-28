@@ -50,37 +50,6 @@ class Overlay:
     art: str | None = None
 
 
-@dataclass
-class ScrollBox:
-    """A scrollable panel that takes over the chamber — used for the Minutes.
-
-    Lines arrive pre-wrapped as (text, style) pairs because scrolling needs an
-    accurate line count, which means owning the wrapping rather than letting
-    Rich do it.
-    """
-
-    title: str
-    lines: list[tuple[str, str]]
-    height: int = 20
-    offset: int = 0
-    subtitle: str = ""
-
-    def clamp(self) -> None:
-        self.offset = max(0, min(self.offset, max(0, len(self.lines) - self.height)))
-
-    def by(self, delta: int) -> None:
-        self.offset += delta
-        self.clamp()
-
-    def to(self, where: str) -> None:
-        self.offset = 0 if where == "top" else len(self.lines)
-        self.clamp()
-
-    @property
-    def at_end(self) -> bool:
-        return self.offset >= len(self.lines) - self.height
-
-
 class Display:
     def __init__(
         self,
@@ -103,7 +72,6 @@ class Display:
         self.max_rounds = 3
         self.active: str = "chairman"
         self.overlay: Overlay | None = None
-        self.scroll: ScrollBox | None = None
         self.toaster_line = sketches.TOASTER[0]
         self._toaster_at = time.monotonic()
 
@@ -215,24 +183,6 @@ class Display:
         self.beat(seconds)
         with self._lock:
             self.overlay = None
-
-    def show_scroll(self, box: ScrollBox) -> None:
-        with self._lock:
-            self.scroll = box
-
-    def scroll_by(self, delta: int) -> None:
-        with self._lock:
-            if self.scroll:
-                self.scroll.by(delta)
-
-    def scroll_to(self, where: str) -> None:
-        with self._lock:
-            if self.scroll:
-                self.scroll.to(where)
-
-    def close_scroll(self) -> None:
-        with self._lock:
-            self.scroll = None
 
     # --- rendering ---------------------------------------------------------------
 
@@ -392,54 +342,6 @@ class Display:
             no_wrap=True,
         )
 
-    def _scrollbox(self) -> RenderableType:
-        sb = self.scroll
-        assert sb is not None
-        sb.clamp()
-        window = sb.lines[sb.offset : sb.offset + sb.height]
-
-        # A proportional thumb down the right edge, so it reads as scrollable at
-        # a glance rather than only when you try the keys.
-        total = max(1, len(sb.lines))
-        thumb_len = max(1, round(sb.height * sb.height / total))
-        thumb_at = round(sb.offset * sb.height / total)
-
-        # no_wrap is load-bearing: the panel is a fixed height and each list
-        # entry must occupy exactly one screen row. If Rich were allowed to wrap
-        # a long line into two rows, the body would grow past the panel height,
-        # the panel past the screen, and the terminal would scroll the top of the
-        # Minutes out of view — which looks like the document starting partway in.
-        body = Table.grid(expand=True)
-        body.add_column(ratio=1, no_wrap=True, overflow="ellipsis")
-        body.add_column(width=1, no_wrap=True)
-        for i in range(sb.height):
-            text, style = window[i] if i < len(window) else ("", "")
-            in_thumb = thumb_at <= i < thumb_at + thumb_len
-            bar = "█" if in_thumb else "│"
-            body.add_row(
-                Text(text, style=style),
-                Text(bar, style="grey54" if in_thumb else "grey27"),
-            )
-
-        first = sb.offset + 1 if sb.lines else 0
-        last = min(sb.offset + sb.height, len(sb.lines))
-        nav = "↑↓ / jk scroll   space page   g / G ends   q or Enter to close"
-        if len(sb.lines) <= sb.height:
-            nav = "q or Enter to close"
-        return Panel(
-            body,
-            width=self.width,
-            title=f"\U0001f4dc  {sb.title}",
-            title_align="left",
-            subtitle=f"{first}–{last} of {len(sb.lines)}   ·   {nav}",
-            subtitle_align="right",
-            border_style="bright_white",
-            box=box.DOUBLE,
-            padding=(0, 2),
-        )
-
     def __rich__(self) -> RenderableType:
         with self._lock:
-            if self.scroll:
-                return Group(self._header(), self._scrollbox())
             return Group(self._header(), self._grid(), self._chair(), self._footer())

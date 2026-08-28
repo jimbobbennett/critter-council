@@ -18,30 +18,33 @@ answer adjourns.
 
 ## Reading the result
 
-When the sitting ends, Foxy's Minutes take over the chamber in a scrollable
-panel — the answer you actually came for, with the sources and the division
-below it:
+When the sitting ends, Foxy's Minutes are written as Markdown, rendered by Rich,
+and opened in your system pager — so scrolling, searching (`/`) and window
+resizing all work the way they do in `less`, because they *are* `less`.
 
-| Key | |
-|---|---|
-| `↑` `↓` / `j` `k` | scroll a line |
-| `space` / `b` | page down / up |
-| `g` / `G` | top / bottom |
-| `q` / `Enter` | close |
+They are also saved to `minutes/sitting-<n>.md`, so the research survives the
+terminal. Piped or non-interactive runs skip the pager and print straight
+through.
 
-`RESOLVED` is the substance: numbered findings that answer the motion, each
-attributed. Below it are `NOTED` (what went wrong procedurally), `ANY OTHER
-BUSINESS`, the division, `SCHEDULE A` of every source consulted, `SCHEDULE B` of
-any that died mid-sitting, and the sitting's token/cost ledger.
+`## Resolved` is the substance: numbered findings that answer the motion, each
+attributed. Then `## Noted` (what went wrong procedurally), `## Any Other
+Business`, the division as a table, `Schedule A` of every source consulted,
+`Schedule B` of any that died mid-sitting, and the sitting's token/cost ledger.
 
-Closing the panel prints a short record to your scrollback — the motion, the
-`RESOLVED` findings, and the tallies. Deliberately compact: the full Minutes run
-past 60 rows, and printing a 60-row box into a 40-row terminal scrolls its own
-top off screen, so you would land mid-sentence in the middle of the answer. The
-detail stays in the panel.
+### Why it works this way
 
-Piped or non-interactive runs get the full version printed instead, since the
-panel only flashes past and the scrollback is all there is.
+An earlier version hand-rolled the text wrapping, a scrollable panel, a
+scrollbar and the terminal width arithmetic. All of it was wrong, in several
+different ways at once: `textwrap` counts characters where terminals count
+cells, a fixed-width Rich column pads rows with trailing spaces, a row of
+exactly the terminal width wraps by one, and Rich prefers a possibly-stale
+`COLUMNS` over the terminal itself.
+
+So none of that code exists now. Markdown is the format, Rich owns the
+rendering, the pager owns the scrolling, and the terminal owns the wrapping.
+Each of those already does its job correctly. If the Minutes ever look wrong
+again, the bug belongs to one of them and not to this repository — which is the
+whole point of the arrangement.
 
 ## The cast, which is also the graph
 

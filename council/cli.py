@@ -12,13 +12,15 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import sys
 import time
 from pathlib import Path
 
+import shutil
+
 from dotenv import load_dotenv
 from rich.console import Console
+from rich.markdown import Markdown
 from rich.live import Live
 from rich.panel import Panel
 from rich.prompt import Prompt
@@ -27,7 +29,7 @@ from rich.text import Text
 from . import llm, sketches
 from .graph import build_graph
 from .ui import minutes as minutes_ui
-from .ui.layout import Display, ScrollBox
+from .ui.layout import Display
 
 ROOT = Path(__file__).resolve().parent.parent
 MIN_WIDTH = 92
@@ -59,196 +61,67 @@ def make_console() -> Console:
     return Console(width=size[0], height=size[1])
 
 
-# Style codes are zero-width on screen but real characters in a captured string.
-# Measuring a capture without stripping them counts colour as content and reports
-# a width the terminal never draws.
-_ANSI = re.compile(r"\x1b(?:\[[0-9;?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\)|[@-Z\\-_])")
-
-
-def _visible(text: str) -> str:
-    """The part of a rendered row the terminal actually draws."""
-    return _ANSI.sub("", text)
-
-
 def doctor(console: Console) -> int:
-    """Report what the app thinks your terminal is, and check the invariants."""
-    from rich.cells import cell_len
+    """Report the environment the council will run in.
 
-    def widest(rows: list[str]) -> int:
-        return max((cell_len(_visible(r)) for r in rows), default=0)
-
-    from .ui import minutes as m
-    from .ui.layout import Display, ScrollBox
-
+    There are no layout invariants to check any more — Rich renders the Minutes
+    and the system pager displays them, so neither wrapping nor geometry is this
+    project's code. What is worth checking is what those two will be handed.
+    """
     ioctl = real_terminal_size()
     console.print()
-    console.print("[bold]Terminal detection[/bold]")
-    console.print(f"  ioctl (authoritative) : {ioctl[0]} x {ioctl[1]}" if ioctl
-                  else "  ioctl                 : unavailable (not a terminal)")
-    console.print(f"  COLUMNS / LINES env   : "
-                  f"{os.environ.get('COLUMNS', 'unset')} / {os.environ.get('LINES', 'unset')}")
+    console.print("[bold]Terminal[/bold]")
+    console.print(
+        f"  ioctl (authoritative) : {ioctl[0]} x {ioctl[1]}"
+        if ioctl
+        else "  ioctl                 : unavailable (not a terminal)"
+    )
+    console.print(
+        f"  COLUMNS / LINES env   : "
+        f"{os.environ.get('COLUMNS', 'unset')} / {os.environ.get('LINES', 'unset')}"
+    )
     console.print(f"  Rich is using         : {console.width} x {console.size.height}")
     if ioctl and (console.width != ioctl[0] or console.size.height != ioctl[1]):
-        console.print("  [red]MISMATCH — stale COLUMNS/LINES would break every "
-                      "width calculation[/red]")
+        console.print("  [red]MISMATCH — a stale COLUMNS would skew rendering[/red]")
     else:
         console.print("  [green]consistent[/green]")
 
+    console.print()
+    console.print("[bold]Minutes display[/bold]")
+    pager = os.environ.get("PAGER")
+    less = shutil.which("less")
+    console.print(f"  PAGER env             : {pager or 'unset'}")
+    console.print(f"  less on PATH          : {less or 'not found'}")
+    if pager:
+        console.print(f"  [green]will page with {pager}[/green]")
+    elif less:
+        console.print("  [green]will page with less -R -F -X[/green]")
+    else:
+        console.print("  [yellow]no pager found; Minutes will print straight out[/yellow]")
+
+    console.print()
+    console.print("[bold]Credentials[/bold]")
+    err = llm.preflight()
+    console.print("  [green]found[/green]" if err is None
+                  else "  [yellow]none — --demo still works[/yellow]")
+
+    console.print()
+    console.print("[bold]Sample render[/bold]")
     sample = {
         "motion": "why do onions make you cry?",
-        "minutes": "RESOLVED\n\n" + "\n\n".join(
-            f"{i}. That the matter is thus, for reasons of some length and detail, "
-            "including an em-dash — and a long unbroken "
-            "https://example.org/a/very/long/path/that/will/not/wrap/nicely/at/all"
-            for i in range(1, 6)),
+        "minutes": "RESOLVED\n\n1. That a volatile sulfur compound irritates the "
+                   "cornea — syn-propanethial-S-oxide, released when the cells are "
+                   "ruptured.\n\n2. That reflex tears flush it, which is why the "
+                   "effect is self-limiting.\n\nNOTED\n\n1. The urn ran dry once.",
         "votes": [{"critter": "Toad", "vote": "aye", "because": "it ends the meeting"}],
-        "sources": [{"title": "T" * 90, "url": "https://example.org/" + "x" * 90}] * 20,
+        "sources": [{"title": "Example source", "url": "https://example.org/onions"}],
         "dead_parrots": [], "forms": [1] * 6, "tea": 12,
     }
+    from .ui import minutes as m
 
+    console.print(Markdown(m.to_markdown(sample, 447)))
     console.print()
-    console.print("[bold]Layout invariants[/bold]")
-    with console.capture() as cap:
-        m.render_digest(console, sample, 447)
-    rows = cap.get().rstrip("\n").split("\n")
-    checks = [
-        ("digest fits the window", len(rows) <= console.size.height,
-         f"{len(rows)} rows / {console.size.height}"),
-        ("no row wider than terminal", widest(rows) <= console.width,
-         f"widest {widest(rows)} / {console.width}"),
-        ("no row at exactly full width",
-         not any(cell_len(_visible(r)) == console.width for r in rows),
-         f"{sum(1 for r in rows if cell_len(_visible(r)) == console.width)} such rows"),
-        ("no trailing whitespace",
-         not any(_visible(r) != _visible(r).rstrip() for r in rows),
-         f"{sum(1 for r in rows if _visible(r) != _visible(r).rstrip())} such rows"),
-    ]
-    d = Display("m", width=console.width - 1)
-    lines = m.scroll_lines(sample, console.width - 1)
-    d.show_scroll(ScrollBox("MINUTES", lines, height=max(4, console.size.height - 8)))
-    with console.capture() as cap:
-        console.print(d)
-    prows = cap.get().rstrip("\n").split("\n")
-    checks += [
-        ("panel fits the window", len(prows) <= console.size.height,
-         f"{len(prows)} rows / {console.size.height}"),
-        ("panel no row too wide", widest(prows) <= console.width,
-         f"widest {widest(prows)} / {console.width}"),
-    ]
-    for name, ok, detail in checks:
-        mark = "[green]PASS[/green]" if ok else "[red]FAIL[/red]"
-        console.print(f"  {mark}  {name:<30} {detail}")
-
-    if not all(ok for _, ok, _ in checks):
-        console.print()
-        console.print("[bold]Widest rows, as the terminal draws them[/bold]")
-        for label, rs in (("digest", rows), ("panel", prows)):
-            worst = max(rs, key=lambda r: cell_len(_visible(r)))
-            vis = _visible(worst)
-            console.print(f"  {label} ({cell_len(vis)} cells):")
-            console.print(Text("  |" + vis + "|", style="grey54"))
-    console.print()
-    return 0 if all(ok for _, ok, _ in checks) else 1
-
-
-def read_key() -> str:
-    """Read one keypress, including arrow-key escape sequences.
-
-    Raw mode via termios, because the Minutes panel has to scroll while the Live
-    display is still driving the screen — there is no line to read.
-
-    Returns "" on EOF or a terminal error. Callers must treat that as "stop
-    reading": on a closed or exhausted stdin, read() returns immediately and
-    forever, so ignoring it spins a busy loop.
-    """
-    import termios
-    import tty
-
-    try:
-        fd = sys.stdin.fileno()
-        old = termios.tcgetattr(fd)
-    except (termios.error, ValueError, OSError):
-        return ""
-    try:
-        tty.setraw(fd)
-        ch = sys.stdin.read(1)
-        if not ch:
-            return ""
-        if ch == "\x1b":  # escape: could be an arrow key
-            ch += sys.stdin.read(2)
-    except (OSError, ValueError):
-        return ""
-    finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, old)
-    return ch
-
-
-def drain_stdin() -> None:
-    """Throw away anything already typed but not yet read.
-
-    The terminal buffers keystrokes during the sitting, and the panel's key loop
-    would consume them the instant it opens: a stray space is a page-down (so the
-    Minutes appear to start partway in), a stray Enter closes the panel before it
-    is seen, and whatever is left leaks to the shell on exit.
-    """
-    try:
-        import termios
-
-        termios.tcflush(sys.stdin.fileno(), termios.TCIFLUSH)
-    except Exception:
-        pass
-
-
-def browse_minutes(display: Display, console: Console, final: dict) -> None:
-    """Show the Minutes as a scrollable panel inside the chamber.
-
-    Non-interactive stdin (a pipe, CI) gets one static frame and moves on, so
-    this never blocks a scripted run.
-    """
-    # header is 5 rows, the panel adds 2 borders, and one row is left spare so
-    # writing the last cell can't scroll the terminal. Floor is low enough that a
-    # very short window shrinks the panel rather than overflowing it.
-    height = max(4, console.size.height - 8)
-    box = ScrollBox(
-        title="MINUTES OF THE SITTING",
-        lines=minutes_ui.scroll_lines(final, console.width - 1),
-        height=height,
-    )
-    display.show_scroll(box)
-
-    if not sys.stdin.isatty():
-        display.beat(2.0)
-        display.close_scroll()
-        return
-
-    # Start from a clean input buffer, and start at the top of the document.
-    drain_stdin()
-    display.scroll_to("top")
-
-    # Note: the panel is deliberately left up on exit rather than closed here.
-    # Live tears down immediately after this returns, so closing it first would
-    # flash the chamber back for a frame on the way out.
-    page = max(1, height - 2)
-    while True:
-        key = read_key()
-        # "" is EOF or a terminal error — never keep looping on it.
-        if key == "" or key in ("q", "Q", "\r", "\n", "\x03", "\x1b"):
-            break
-        elif key in ("j", "\x1b[B"):
-            display.scroll_by(1)
-        elif key in ("k", "\x1b[A"):
-            display.scroll_by(-1)
-        elif key in (" ", "\x1b[6~", "f"):
-            display.scroll_by(page)
-        elif key in ("b", "\x1b[5~"):
-            display.scroll_by(-page)
-        elif key == "g":
-            display.scroll_to("top")
-        elif key == "G":
-            display.scroll_to("end")
-
-    # Don't let unread keypresses spill onto the shell prompt after teardown.
-    drain_stdin()
+    return 0
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -428,10 +301,7 @@ def run_sitting(
             except Exception as exc:  # noqa: BLE001 — last line of defence
                 blew_up = exc
             if final:
-                display.beat(1.0)
-                # Foxy's actual output, in the chamber, before anything can
-                # scroll it away. Blocks until dismissed.
-                browse_minutes(display, console, final)
+                display.beat(1.2)
     finally:
         display.stop()
 
@@ -524,15 +394,13 @@ def main(argv: list[str] | None = None) -> int:
                     break
 
             final = run_sitting(console, motion, args, sitting)
-            # Interactively, the reader has just scrolled the full Minutes in the
-            # panel, so the scrollback copy is a short record. Non-interactively
-            # the panel only flashed, so print everything — it is all they get.
-            if not final:
-                pass  # sitting collapsed; run_sitting has already explained
-            elif sys.stdin.isatty():
-                minutes_ui.render_digest(console, final, sitting)
-            else:
-                minutes_ui.render(console, final, sitting)
+            # Markdown, rendered by Rich, displayed by the pager, saved to a
+            # file. None of those three is this project's code, which is the
+            # point: each of them already handles its job correctly.
+            if final:
+                markdown = minutes_ui.to_markdown(final, sitting)
+                path = minutes_ui.write_file(markdown, sitting)
+                minutes_ui.show(console, markdown, path)
             sittings_held += 1
             sitting += 1
             motion = ""
