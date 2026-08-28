@@ -91,7 +91,7 @@ def browse_minutes(display: Display, console: Console, final: dict) -> None:
     height = max(4, console.size.height - 8)
     box = ScrollBox(
         title="MINUTES OF THE SITTING",
-        lines=minutes_ui.scroll_lines(final, console.width),
+        lines=minutes_ui.scroll_lines(final, console.width - 1),
         height=height,
     )
     display.show_scroll(box)
@@ -242,7 +242,7 @@ def ask_for_motion(console: Console, sitting: int, question: str) -> str:
     as a cold open anyway. The line is scripted, not generated — there is no
     motion yet, so there is nothing to spend a token on.
     """
-    display = Display("awaiting a motion", sitting=sitting)
+    display = Display("awaiting a motion", sitting=sitting, width=console.width - 1)
     for key, line in sketches.WAITING.items():
         display.panels[key].visible = line
         display.panels[key].status = "assembled"
@@ -267,7 +267,7 @@ def run_sitting(
     console: Console, motion: str, args: argparse.Namespace, sitting: int
 ) -> dict:
     llm.LEDGER.reset()
-    display = Display(motion, sitting=sitting, speed=args.speed)
+    display = Display(motion, sitting=sitting, speed=args.speed, width=console.width - 1)
     display.start()
     graph = build_graph(display, sitting=sitting, evidence=2 if args.quick else 5)
 

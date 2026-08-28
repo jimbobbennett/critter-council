@@ -82,7 +82,19 @@ class ScrollBox:
 
 
 class Display:
-    def __init__(self, motion: str, sitting: int = 447, speed: float = 1.0):
+    def __init__(
+        self,
+        motion: str,
+        sitting: int = 447,
+        speed: float = 1.0,
+        width: int | None = None,
+    ):
+        # Rendering one column narrower than the terminal is deliberate.
+        # Terminals and Rich disagree about the cell width of several emoji
+        # (📜 🫖 🐿 🦉 …). A full-width row is already exactly `width` columns, so
+        # a single miscounted glyph makes it width+1, the terminal wraps it, and
+        # every wrapped row pushes the top of the content off the screen.
+        self.width = width
         self.motion = motion
         self.sitting = sitting
         self.speed = max(0.2, speed)
@@ -304,7 +316,11 @@ class Display:
             ("MOTION: ", "bold grey62"), (f'"{self.motion}"', "italic bright_white")
         )
         return Panel(
-            Group(top, motion), box=box.DOUBLE, border_style="white", padding=(0, 1)
+            Group(top, motion),
+            box=box.DOUBLE,
+            border_style="white",
+            padding=(0, 1),
+            width=self.width,
         )
 
     def _grid(self) -> RenderableType:
@@ -326,8 +342,10 @@ class Display:
                 box=box.DOUBLE,
                 padding=(1, 2),
                 height=GRID_ROW_HEIGHT * 2,
+                width=self.width,
             )
         g = Table.grid(expand=True)
+        g.width = self.width
         g.add_column(ratio=1)
         g.add_column(ratio=1)
         g.add_row(self._critter(self.panels["nigel"]), self._critter(self.panels["owlsworth"]))
@@ -350,6 +368,7 @@ class Display:
         )
         return Panel(
             row,
+            width=self.width,
             title=f"{p.icon} {p.name}",
             title_align="left",
             border_style="green" if p.state in ("working", "talking") else "grey30",
@@ -409,6 +428,7 @@ class Display:
             nav = "q or Enter to close"
         return Panel(
             body,
+            width=self.width,
             title=f"\U0001f4dc  {sb.title}",
             title_align="left",
             subtitle=f"{first}–{last} of {len(sb.lines)}   ·   {nav}",

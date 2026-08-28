@@ -140,44 +140,43 @@ def _section(minutes: str, name: str) -> list[str]:
 def render_digest(console: Console, state: dict, sitting: int) -> None:
     """The short record printed after the scrollable panel is dismissed.
 
-    Deliberately not a box: the full Minutes run past 60 rows, and a panel taller
-    than the terminal scrolls its own top border off screen, which reads as
-    broken output. A rule plus plain text overflows gracefully instead — and the
-    detail is one keypress away in the panel the reader just closed.
+    Two hard rules, both learned from bugs:
+
+    * Not a box. The full Minutes run past 60 rows, and a panel taller than the
+      terminal scrolls its own top border off screen, which reads as broken.
+    * Never print more rows than the terminal has. A terminal always scrolls to
+      the bottom of what it is given, so anything taller than the window loses
+      its top — you land midway down the list and the first resolutions are gone
+      above the fold. This builds every row first, then prints only what fits.
     """
-    console.print()
-    console.rule(
-        f"[bold bright_white]\U0001f4dc  MINUTES OF THE {_ordinal(sitting)} SITTING",
-        style="grey37",
-        align="left",
-    )
-    console.print()
-    console.print(f'  [italic grey62]MOTION:[/italic grey62] "{state.get("motion", "")}"')
-    console.print()
+    W = max(40, console.width - 6)
+    rows: list[Text | None] = []          # None == blank line
+
+    def add(text: str = "", style: str = "white", indent: str = "", hang: str = "") -> None:
+        if not text:
+            rows.append(None)
+            return
+        for line in textwrap.wrap(
+            text, W, initial_indent=indent, subsequent_indent=hang or indent
+        ) or [""]:
+            rows.append(Text(line, style=style))
+
+    add(f'MOTION: "{state.get("motion", "")}"', "italic grey62", indent="  ")
+    add()
 
     resolved = _section(state.get("minutes") or "", "RESOLVED")
+    body_start = len(rows)
     if resolved:
-        console.print("  [bold bright_white]RESOLVED[/bold bright_white]")
-        # Wrap here rather than letting Rich do it, so continuation lines keep a
-        # hanging indent and numbered resolutions stay readable as a list.
-        width = max(40, console.width - 6)
+        add("RESOLVED", "bold bright_white", indent="  ")
         for line in resolved:
-            body = line.strip()
-            if not body:
-                console.print()
+            item = line.strip()
+            if not item:
+                add()
                 continue
-            numbered = body[0].isdigit()
-            for out in textwrap.wrap(
-                body,
-                width,
-                initial_indent="  ",
-                subsequent_indent="     " if numbered else "  ",
-            ):
-                console.print(Text(out, style="white"))
+            numbered = item[0].isdigit()
+            add(item, "white", indent="  ", hang="     " if numbered else "  ")
     else:
-        console.print(
-            "  [italic red]The council established nothing. Toad blames Nigel.[/italic red]"
-        )
+        add("The council established nothing. Toad blames Nigel.", "italic red", indent="  ")
 
     votes = state.get("votes") or []
     ayes = sum(1 for v in votes if v.get("vote") == "aye")
@@ -186,24 +185,54 @@ def render_digest(console: Console, state: dict, sitting: int) -> None:
     sources = state.get("sources") or []
     dead = state.get("dead_parrots") or []
 
-    console.print()
-    if votes:
-        outcome = "Carried" if ayes > nays else "Fallen"
-        console.print(
-            f"  [grey54]{outcome} {ayes}–{nays}"
-            f"{f' ({abst} abstention{"s" if abst != 1 else ""})' if abst else ''}"
-            f"  ·  {len(sources)} sources  ·  {len(dead)} deceased"
-            f"  ·  {len(state.get('forms') or [])} forms[/grey54]"
-        )
-
     from .. import llm
 
+    tail: list[Text | None] = []
+    if votes:
+        outcome = "Carried" if ayes > nays else "Fallen"
+        extra = f" ({abst} abstention{'s' if abst != 1 else ''})" if abst else ""
+        tail.append(
+            Text(
+                f"  {outcome} {ayes}-{nays}{extra}  ·  {len(sources)} sources"
+                f"  ·  {len(dead)} deceased  ·  {len(state.get('forms') or [])} forms",
+                style="grey54",
+            )
+        )
     if llm.LEDGER.calls:
-        console.print(f"  [grey42]{llm.LEDGER.summary()}[/grey42]")
-    console.print(
-        "  [grey30]NOTED, ANY OTHER BUSINESS, the division and the full source "
-        "list were in the panel.[/grey30]"
+        tail.append(Text("  " + llm.LEDGER.summary(), style="grey42"))
+
+    # Chrome printed outside `rows`: a blank, the rule, a blank, then after the
+    # body a possible truncation note, a blank, the tail, and a trailing blank.
+    # That is 5 fixed rows + len(tail) + 1 for the note, so the body gets the
+    # rest. Floor of 3 keeps MOTION and the first resolution visible even in a
+    # very short window.
+    budget = console.size.height - 6 - len(tail)
+    if budget < 3:
+        # Window too short to afford the tallies as well as the findings. The
+        # findings are what the reader came for, so the tail goes first.
+        tail = []
+        budget = max(1, console.size.height - 6)
+    truncated = 0
+    if len(rows) > budget:
+        keep = max(body_start + 1, budget - 1)
+        truncated = len(rows) - keep
+        rows = rows[:keep]
+
+    console.print()
+    console.rule(
+        f"MINUTES OF THE {_ordinal(sitting)} SITTING", style="grey37", align="left"
     )
+    console.print()
+    for row in rows:
+        console.print(row if row is not None else "")
+    if truncated:
+        console.print(
+            f"  [grey30]… {truncated} more line(s) — the full Minutes were in the "
+            f"scrollable panel.[/grey30]"
+        )
+    console.print()
+    for row in tail:
+        console.print(row)
     console.print()
 
 
