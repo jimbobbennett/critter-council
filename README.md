@@ -125,7 +125,7 @@ council --quick                       # one search round, about half the cost
 council --model claude-sonnet-5       # cheaper voice model
 council --research-model claude-opus-5  # spend more on the research turns
 council --cast                        # introduce the cast and exit
-council --doctor                      # check terminal detection and layout
+council --doctor                      # check terminal detection and pager
 council --once                        # adjourn after one motion, no AOB
 ```
 

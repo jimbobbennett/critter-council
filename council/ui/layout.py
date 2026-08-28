@@ -72,8 +72,6 @@ class Display:
         self.max_rounds = 3
         self.active: str = "chairman"
         self.overlay: Overlay | None = None
-        self.toaster_line = sketches.TOASTER[0]
-        self._toaster_at = time.monotonic()
 
         self.panels: dict[str, CritterPanel] = {
             "nigel": CritterPanel("nigel", "NIGEL (Scout)", "\U0001f43f", "yellow", "nigel"),
@@ -107,7 +105,6 @@ class Display:
         tick = 1.0 / 40.0
         while not self._stop.is_set():
             time.sleep(tick)
-            now = time.monotonic()
             with self._lock:
                 for p in self.panels.values():
                     if not p.pending:
@@ -118,9 +115,6 @@ class Display:
                         p._acc -= take
                         p.visible += p.pending[:take]
                         p.pending = p.pending[take:]
-                if now - self._toaster_at > 9.0 / self.speed:
-                    self._toaster_at = now
-                    self.toaster_line = sketches.pick(sketches.TOASTER)
 
     def beat(self, seconds: float) -> None:
         time.sleep(max(0.0, seconds) / self.speed)
@@ -326,22 +320,6 @@ class Display:
             padding=(0, 1),
         )
 
-    def _footer(self) -> RenderableType:
-        # Just the toaster, across the full width. It gets the whole line to
-        # itself, which is the only recognition it will ever receive.
-        #
-        # Unicode has no toaster emoji, so the bread sits in a slot instead:
-        # [🍞] reads as a two-slot toaster at a glance. The brackets are
-        # single-width ASCII, so nothing shifts.
-        return Text.assemble(
-            ("  [", "grey30"),
-            ("\U0001f35e", ""),
-            ("]  ", "grey30"),
-            (f'"{self.toaster_line}"', "italic grey42"),
-            overflow="ellipsis",
-            no_wrap=True,
-        )
-
     def __rich__(self) -> RenderableType:
         with self._lock:
-            return Group(self._header(), self._grid(), self._chair(), self._footer())
+            return Group(self._header(), self._grid(), self._chair())

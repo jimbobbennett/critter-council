@@ -83,17 +83,6 @@ FORM_BLOCKS = [
 ]
 
 
-# --- the toaster: never acknowledged ------------------------------------------
-
-TOASTER = [
-    'Would anyone like any toast?',
-    'How about a crumpet? Waffle? Muffin?',
-    "I'm a talkie toaster. I make toast. Toast?",
-    "Nobody? Not even a lightly grilled teacake?",
-    "I toast, therefore I am. Toast?",
-]
-
-
 # --- fallbacks, if the model returns something unusable -----------------------
 
 CUNNING_PLAN_FALLBACK = [
