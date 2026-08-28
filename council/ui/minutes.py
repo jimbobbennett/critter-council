@@ -8,7 +8,6 @@ wrap it, so the Minutes survive in the scrollback once the chamber is gone.
 
 from __future__ import annotations
 
-import textwrap
 
 from rich import box
 from rich.cells import cell_len
@@ -19,6 +18,51 @@ from rich.text import Text
 
 VOTE_STYLE = {"aye": "green", "nay": "red", "abstain": "yellow"}
 HEADINGS = ("RESOLVED", "NOTED", "ANY OTHER BUSINESS")
+
+
+
+def _wrap_cells(
+    text: str, width: int, indent: str = "", hang: str | None = None
+) -> list[str]:
+    """Greedy word wrap measured in display CELLS, not characters.
+
+    textwrap counts characters, so a line containing an emoji is a cell wider
+    than computed and a CJK glyph two — enough to overflow the terminal and make
+    it wrap. Rich tables measure correctly but a fixed-width column pads every
+    cell with trailing spaces to fill it, and padding that overflows the terminal
+    wraps too, making the following line look pushed right. This does neither:
+    exact cell measurement, and lines that end where the text ends.
+    """
+    hang = indent if hang is None else hang
+    words = text.split()
+    if not words:
+        return [""]
+
+    lines: list[str] = []
+    cur: str | None = None
+    prefix = indent
+    for word in words:
+        cand = (prefix + word) if cur is None else (cur + " " + word)
+        if cur is None or cell_len(cand) <= width:
+            cur = cand
+        else:
+            lines.append(cur)
+            prefix = hang
+            cur = prefix + word
+    if cur is not None:
+        lines.append(cur)
+
+    # Hard-split anything still too wide — a single unbroken token, e.g. a URL.
+    out: list[str] = []
+    for line in lines:
+        while cell_len(line) > width:
+            cut = len(line)
+            while cut > 1 and cell_len(line[:cut]) > width:
+                cut -= 1
+            out.append(line[:cut])
+            line = hang + line[cut:]
+        out.append(line)
+    return out
 
 
 def scroll_lines(state: dict, width: int) -> list[tuple[str, str]]:
@@ -39,9 +83,7 @@ def scroll_lines(state: dict, width: int) -> list[tuple[str, str]]:
         if not text:
             out.append(("", style))
             return
-        for line in textwrap.wrap(
-            text, w, initial_indent=indent, subsequent_indent=hang if hang is not None else indent
-        ) or [""]:
+        for line in _wrap_cells(text, w, indent, hang):
             out.append((line, style))
 
     add(f'MOTION: "{state.get("motion", "")}"', "italic grey62")
@@ -157,54 +199,29 @@ def _paragraphs(lines: list[str]) -> list[str]:
     return out
 
 
-def _numbered_grid(items: list[str], body_width: int) -> Table:
-    """Resolutions as a two-column grid.
-
-    The hanging indent is structural rather than a string of spaces, and Rich
-    does the wrapping — which matters because Rich measures display *cells*
-    while textwrap counts *characters*. One emoji is one cell wider than its
-    character count, one CJK glyph is two, so hand-computed wrap widths overflow
-    the terminal by a character and it wraps, which is what made this list look
-    offset and pushed its opening off the top of the screen.
-    """
-    # Not expand=True, and the margin is a column rather than Padding: an
-    # expanded renderable pads every line with spaces out to the full width, and
-    # a row of exactly `width` cells is what makes a terminal wrap by one.
-    t = Table.grid(padding=(0, 1))
-    t.add_column(width=1, no_wrap=True)          # left margin
-    t.add_column(width=2, no_wrap=True)          # "1."
-    t.add_column(width=body_width, overflow="fold")
-    for item in items:
-        head, _, rest = item.partition(" ")
-        if head[:1].isdigit():
-            t.add_row("", Text(head, style="white"), Text(rest, style="white"))
-        else:
-            t.add_row("", "", Text(item, style="white"))
-        t.add_row("", "", "")
-    return t
-
-
 def render_digest(console: Console, state: dict, sitting: int) -> None:
     """The short record printed after the scrollable panel is dismissed.
 
-    Two hard rules, both learned from bugs:
-
-    * Not a box, and never taller than the window. A terminal always scrolls to
-      the bottom of what it is given, so anything taller loses its top and the
-      reader lands midway down the findings. Items are added only while they
-      measurably fit.
-    * Rich does all wrapping and all measuring. No character arithmetic.
+    Every row is built as a plain string wrapped to an exact cell width, so the
+    printed row count is known before anything reaches the terminal and nothing
+    is padded. No table, no Padding, no console.rule — each of those emits rows
+    that fill the full width, and a row of exactly `width` cells is what makes a
+    terminal wrap by one.
     """
-    inner = max(30, console.width - 2)          # two spare columns, always
-    body_width = max(20, inner - 8)             # margin + number + grid padding
-    opts = console.options.update(width=inner)
+    width = max(30, console.width - 2)      # always keep a spare column
+    lines: list[tuple[str, str]] = []
 
-    def rows_of(renderable) -> int:
-        return len(console.render_lines(renderable, opts, pad=False))
+    def add(text: str = "", style: str = "white", indent: str = "  ", hang: str | None = None):
+        if not text:
+            lines.append(("", style))
+            return
+        for line in _wrap_cells(text, width, indent, hang):
+            lines.append((line, style))
 
-    motion = Text.assemble(
-        ("MOTION: ", "italic grey62"), (f'"{state.get("motion", "")}"', "italic grey74")
-    )
+    add(f'MOTION: "{state.get("motion", "")}"', "italic grey62")
+    add()
+
+    items = _paragraphs(_section(state.get("minutes") or "", "RESOLVED"))
 
     votes = state.get("votes") or []
     ayes = sum(1 for v in votes if v.get("vote") == "aye")
@@ -215,71 +232,64 @@ def render_digest(console: Console, state: dict, sitting: int) -> None:
 
     from .. import llm
 
-    tail: list[Text] = []
+    tail: list[tuple[str, str]] = []
     if votes:
         outcome = "Carried" if ayes > nays else "Fallen"
         extra = f" ({abst} abstention{'s' if abst != 1 else ''})" if abst else ""
-        tail.append(
-            Text(
-                f"{outcome} {ayes}-{nays}{extra}  ·  {len(sources)} sources"
-                f"  ·  {len(dead)} deceased  ·  {len(state.get('forms') or [])} forms",
-                style="grey54",
-            )
-        )
+        for ln in _wrap_cells(
+            f"{outcome} {ayes}-{nays}{extra}  ·  {len(sources)} sources"
+            f"  ·  {len(dead)} deceased  ·  {len(state.get('forms') or [])} forms",
+            width, "  ",
+        ):
+            tail.append((ln, "grey54"))
     if llm.LEDGER.calls:
-        tail.append(Text(llm.LEDGER.summary(), style="grey42"))
+        for ln in _wrap_cells(llm.LEDGER.summary(), width, "  "):
+            tail.append((ln, "grey42"))
 
-    items = _paragraphs(_section(state.get("minutes") or "", "RESOLVED"))
+    # Fixed rows: a blank, the heading, a blank, then after the body a possible
+    # truncation note and a trailing blank. Plus the tail.
+    fixed = 5 + len(tail)
+    budget = console.size.height - fixed - len(lines)
+    if budget < 2:
+        tail = []                       # findings matter more than tallies
+        budget = console.size.height - 5 - len(lines)
 
-    # Everything printed that is not a resolution: a blank, the heading, a blank,
-    # the motion, a blank, "RESOLVED", the truncation note, and a trailing blank.
-    # That is 8, plus however many rows the tallies take.
-    chrome = 8 + sum(rows_of(t) for t in tail)
-    budget = console.size.height - chrome
-    if budget < 3:
-        # Too short for findings and tallies both. The findings are the point.
-        tail = []
-        budget = max(0, console.size.height - 8)
+    body: list[tuple[str, str]] = []
+    shown = 0
+    if items:
+        head = [("  RESOLVED", "bold bright_white")]
+        for item in items:
+            block: list[tuple[str, str]] = []
+            for ln in _wrap_cells(item, width, "  ", "     "):
+                block.append((ln, "white"))
+            block.append(("", "white"))
+            if len(head) + len(body) + len(block) > budget:
+                break
+            body += block
+            shown += 1
+        if shown:
+            body = head + body
+    if not shown:
+        body = [("  The council established nothing worth minuting.", "italic red")]
+    dropped = len(items) - shown
 
-    # Add resolutions only while they measurably fit. Measuring beats arithmetic:
-    # it accounts for cell widths, styles and the grid's own padding.
-    shown: list[str] = []
-    for item in items:
-        trial = _numbered_grid(shown + [item], body_width)
-        if rows_of(trial) > budget:
-            break
-        shown.append(item)
-    dropped = len(items) - len(shown)
-
-    # Hand-rolled rather than console.rule(): rule fills the full width exactly,
-    # and a row of precisely `width` cells is what a terminal wraps by one. This
-    # always leaves a spare column.
     title = f"MINUTES OF THE {_ordinal(sitting)} SITTING "
-    bar = "─" * max(0, (console.width - 1) - cell_len(title))
+    bar = "\u2500" * max(0, width - cell_len(title))
+
     console.print()
-    console.print(
-        Text(title, style="bold bright_white") + Text(bar, style="grey37")
-    )
+    console.print(Text(title, style="bold bright_white") + Text(bar, style="grey37"))
     console.print()
-    console.print(Text("  ") + motion)
-    console.print()
-    if shown:
-        console.print(Text("  RESOLVED", style="bold bright_white"))
-        console.print(_numbered_grid(shown, body_width))
-    else:
-        console.print(
-            Text("  The council established nothing. Toad blames Nigel.", "italic red")
-        )
+    for text, style in lines + body:
+        console.print(Text(text, style=style) if text else "")
     if dropped:
         console.print(
             Text(
-                f"  … {dropped} further resolution(s) — the full Minutes were in "
-                "the panel.",
+                f"  ... {dropped} further resolution(s) - the full Minutes were in the panel.",
                 style="grey30",
             )
         )
-    for t in tail:
-        console.print(Text("  ") + t)
+    for text, style in tail:
+        console.print(Text(text, style=style))
     console.print()
 
 
