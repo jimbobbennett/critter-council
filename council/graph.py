@@ -34,6 +34,11 @@ from .ui.layout import Display, Overlay
 
 MAX_ROUNDS = 3
 
+# The chair may take at most this many turns before he must refer the matter to
+# the Clerk. A healthy sitting uses 8-11; this only bites when something is
+# wrong, and it keeps the graph far below LangGraph's recursion limit.
+MAX_STEPS = 16
+
 # How many verified claims the chair will settle for. Five reliably buys a
 # second search round, which is both better research and a fuller sitting;
 # --quick halves it for a cheaper run.
@@ -111,6 +116,7 @@ def build_graph(display: Display, *, sitting: int = 447, evidence: int = ENOUGH_
         display.status("toad", "presiding")
         return {
             "tea": drain(state, "chairman"),
+            "steps": state.get("steps", 0) + 1,
             "transcript": [{"critter": "Toad", "text": remark}],
         }
 
@@ -265,9 +271,9 @@ def build_graph(display: Display, *, sitting: int = 447, evidence: int = ENOUGH_
 
         findings = state.get("findings") or []
         assessed = set(state.get("assessed") or [])
-        pending = [f for f in findings if f.get("claim") not in assessed]
+        pending = [(i, f) for i, f in enumerate(findings) if i not in assessed]
         claims = "\n".join(
-            f"{i}. {f.get('claim', '')}" for i, f in enumerate(pending)
+            f"{n}. {f.get('claim', '')}" for n, (_, f) in enumerate(pending)
         )
 
         turn = llm.structured(
@@ -284,9 +290,9 @@ def build_graph(display: Display, *, sitting: int = 447, evidence: int = ENOUGH_
             demo_key=f"buzz_{min(state.get('round', 1), 3)}",
         )
 
-        # Every pending claim is marked assessed regardless of what comes back,
-        # so a missing or malformed verdict can never loop the council forever.
-        all_pending = [f.get("claim", "") for f in pending]
+        # Every pending finding is marked assessed regardless of what comes
+        # back, so a missing or malformed verdict can never loop the council.
+        all_pending = [i for i, _ in pending]
 
         if not turn:
             display.say("buzzwick", sketches.pick(sketches.FORM_BLOCKS))
@@ -297,9 +303,9 @@ def build_graph(display: Display, *, sitting: int = 447, evidence: int = ENOUGH_
 
         display.say("buzzwick", turn.quip)
 
-        # Match verdicts back by index, not by string equality.
+        # Match verdicts back by position in the numbered list we sent.
         verified = [
-            pending[v.claim_index]["claim"]
+            pending[v.claim_index][1].get("claim", "")
             for v in turn.verdicts
             if v.verdict == "verified" and 0 <= v.claim_index < len(pending)
         ]
@@ -446,6 +452,14 @@ def build_graph(display: Display, *, sitting: int = 447, evidence: int = ENOUGH_
     # --- routing ------------------------------------------------------------------
 
     def route_from_chair(state: CouncilState) -> str:
+        # Hard ceiling on the length of a sitting. Every routing branch below is
+        # meant to terminate on its own, but a bug in any one of them would
+        # otherwise burn turns and money until LangGraph's recursion limit threw.
+        # Past the cap the chair simply refers the matter to Foxy, so the worst
+        # outcome is a short sitting with Minutes rather than a crash.
+        if state.get("steps", 0) >= MAX_STEPS:
+            return "foxy_minutes"
+
         if state.get("tea", 100) <= 0:
             return "tea_break"
 
@@ -465,8 +479,8 @@ def build_graph(display: Display, *, sitting: int = 447, evidence: int = ENOUGH_
             return "owlsworth_analyse"
 
         findings = state.get("findings") or []
-        assessed = state.get("assessed") or []
-        if len(assessed) < len(findings):
+        assessed = set(state.get("assessed") or [])
+        if any(i not in assessed for i in range(len(findings))):
             return "buzzwick_verify"
 
         verified = state.get("verified") or []

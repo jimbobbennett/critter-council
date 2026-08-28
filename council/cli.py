@@ -277,6 +277,7 @@ def run_sitting(
         "round": 1,
         "inquisitions": 0,
         "barren": 0,
+        "steps": 0,
         "contradictions": [],
     }
     final: dict = {}
@@ -291,7 +292,12 @@ def run_sitting(
         ):
             display.beat(1.2)
             try:
-                final = graph.invoke(initial, config={"recursion_limit": 60})
+                # Lowered from 60 deliberately. The router's MAX_STEPS ceiling
+                # bounds a sitting at ~33 nodes even when a branch misbehaves,
+                # so this is a genuine backstop rather than a ceiling the graph
+                # is expected to approach. If it ever throws, that is a routing
+                # bug to fix, not a number to raise.
+                final = graph.invoke(initial, config={"recursion_limit": 45})
             except KeyboardInterrupt:
                 raise
             except Exception as exc:  # noqa: BLE001 — last line of defence

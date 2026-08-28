@@ -113,9 +113,12 @@ class CouncilState(TypedDict, total=False):
     # back to work instead of the router skipping him
     analysed: Annotated[list[str], operator.add]
 
-    # every claim Buzzwick has ruled on (verified is the subset he approved).
-    # Routing keys off `assessed` so a "dubious" verdict can't loop forever.
-    assessed: Annotated[list[str], operator.add]
+    # INDICES into `findings` that Buzzwick has ruled on. Indices, not claim
+    # text: `findings` is append-only so an index is a stable identity, whereas
+    # two findings can carry identical claim text — and when they did, the
+    # membership test found the text already assessed while the length test said
+    # otherwise, so the chair and Buzzwick looped until the recursion limit.
+    assessed: Annotated[list[int], operator.add]
     verified: Annotated[list[str], operator.add]
 
     # cleared by the inquisition, so it cannot be append-only
@@ -128,3 +131,5 @@ class CouncilState(TypedDict, total=False):
     inquisitions: int
     # searches that returned nothing new; stops the chair/Nigel ping-pong
     barren: int
+    # turns the chair has taken; capped so a sitting cannot grow without bound
+    steps: int
